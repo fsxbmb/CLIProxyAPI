@@ -144,6 +144,18 @@ proxy-url: "http://127.0.0.1:7890"
 
 第三方中转需要填写 Base URL、API key 和模型映射。余额接口因供应商不同而不同，已知供应商会自动匹配，其他供应商可以在 Web UI 中填写余额查询 URL 和 JSON 路径。
 
+### 多账号路由策略
+
+默认使用 `fill-first`：优先持续使用一个可用账号，直到上游报告额度耗尽或账号暂时不可用，再切换到下一个账号。这样比 `round-robin` 更有利于保持同一账号的 Prompt Cache。可在 `config.yaml` 中改为：
+
+```yaml
+routing:
+  strategy: "fill-first"       # 先用完一个，再切换
+  session-affinity: false
+```
+
+可选策略还包括 `round-robin`（轮询）和 `weighted-round-robin`（按账号权重轮询）。
+
 ## 让其他应用接入
 
 通用 OpenAI-compatible 客户端使用：

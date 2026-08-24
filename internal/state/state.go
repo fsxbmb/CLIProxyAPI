@@ -198,7 +198,7 @@ quota-exceeded:
   antigravity-credits: true
 
 routing:
-  strategy: "round-robin"
+  strategy: "fill-first"
   session-affinity: false
 
 openai-compatibility: []

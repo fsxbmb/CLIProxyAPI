@@ -43,7 +43,8 @@ max-retry-credentials: 3
 max-retry-interval: 20
 
 routing:
-  strategy: "round-robin"
+  # Use one credential until it is unavailable/quota-exhausted, then fail over.
+  strategy: "fill-first"
   session-affinity: false
 
 openai-compatibility:
