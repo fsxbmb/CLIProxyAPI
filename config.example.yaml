@@ -1,0 +1,50 @@
+# Reference only. `cliproxy-lite init` generates real local secrets and paths.
+host: "127.0.0.1"
+port: 8317
+
+tls:
+  enable: false
+  cert: ""
+  key: ""
+
+remote-management:
+  allow-remote: false
+  secret-key: "replace-with-a-long-random-management-key"
+  disable-control-panel: true
+  disable-auto-update-panel: true
+
+auth-dir: "/Users/you/Library/Application Support/CLIProxyAPI-Lite/auth"
+api-keys:
+  - "replace-with-a-long-random-local-api-key"
+
+plugins:
+  enabled: false
+  dir: "/Users/you/Library/Application Support/CLIProxyAPI-Lite/plugins"
+
+debug: false
+pprof:
+  enable: false
+  addr: "127.0.0.1:8316"
+commercial-mode: true
+logging-to-file: false
+usage-statistics-enabled: false
+request-log: false
+ws-auth: true
+
+request-retry: 2
+max-retry-credentials: 3
+max-retry-interval: 20
+
+routing:
+  strategy: "round-robin"
+  session-affinity: false
+
+openai-compatibility:
+  - name: "Qwen"
+    prefix: "qwen"
+    base-url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api-key-entries:
+      - api-key: "replace-with-dashscope-key"
+    models:
+      - name: "qwen3-coder-plus"
+        alias: "qwen-coder"

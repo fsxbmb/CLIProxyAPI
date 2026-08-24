@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>CLIProxyAPI Lite</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">CP</div>
+      <div>
+        <h1>CLIProxyAPI <span>Lite</span></h1>
+        <p>本机 AI 模型网关</p>
+      </div>
+    </div>
+    <div class="server-state">
+      <span id="state-dot" class="dot"></span>
+      <div><strong id="state-text">等待连接</strong><small id="api-base">127.0.0.1</small></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="unlock card" id="unlock-card">
+      <div>
+        <p class="eyebrow">LOCAL ADMIN</p>
+        <h2>连接本机管理接口</h2>
+        <p class="muted">输入 <code>cliproxy-lite keys</code> 显示的 Management key。密钥只保存在当前浏览器标签页。</p>
+      </div>
+      <div class="unlock-form">
+        <input id="management-key" type="password" autocomplete="off" spellcheck="false" placeholder="mgmt_…">
+        <button id="connect-button" class="primary">连接</button>
+      </div>
+    </section>
+
+    <nav class="tabs" aria-label="管理页面">
+      <button class="tab active" data-tab="overview">总览</button>
+      <button class="tab" data-tab="accounts">OAuth 账号</button>
+      <button class="tab" data-tab="relays">中转与 Qwen</button>
+      <button class="tab" data-tab="debug">调试</button>
+    </nav>
+
+    <section id="overview" class="panel active">
+      <div class="metrics">
+        <article class="metric card"><span>OAuth 账号</span><strong id="account-count">—</strong><small>自动轮询与故障切换</small></article>
+        <article class="metric card"><span>GPT Plus</span><strong id="codex-count">— / 2</strong><small>目标：连接两个账号</small></article>
+        <article class="metric card"><span>兼容中转</span><strong id="relay-count">—</strong><small>OpenAI-compatible</small></article>
+        <article class="metric card"><span>可见模型</span><strong id="model-count">—</strong><small>统一模型目录</small></article>
+      </div>
+
+      <div class="grid two">
+        <article class="card section-card">
+          <div class="section-title"><div><p class="eyebrow">CLIENT ENDPOINT</p><h2>给 Agent / CLI 使用</h2></div><button id="copy-endpoint" class="ghost">复制地址</button></div>
+          <label>OpenAI Base URL</label>
+          <div class="copy-row"><code id="endpoint-value">http://127.0.0.1:8317/v1</code></div>
+          <label>本机 API key</label>
+          <div class="secret-row"><code id="api-key-value">连接管理接口后显示</code><button id="reveal-key" class="ghost" disabled>显示</button><button id="copy-key" class="ghost" disabled>复制</button></div>
+          <p class="hint">支持 OpenAI Chat Completions、Responses，以及上游提供的 Anthropic / Gemini 兼容路由。</p>
+        </article>
+
+        <article class="card section-card">
+          <p class="eyebrow">QUICK START</p>
+          <h2>通用 OpenAI 客户端</h2>
+          <pre id="shell-example">export OPENAI_BASE_URL="http://127.0.0.1:8317/v1"
+export OPENAI_API_KEY="你的本机 API key"</pre>
+          <button id="copy-shell" class="ghost">复制环境变量</button>
+          <p class="hint">Codex、OpenCode、Aider、Continue 等工具只要允许自定义 Base URL，就可以接入。</p>
+        </article>
+      </div>
+
+      <article class="card section-card privacy">
+        <div><p class="eyebrow">PRIVACY DEFAULTS</p><h2>默认只在本机工作</h2></div>
+        <ul>
+          <li><span class="check">✓</span> API 与管理界面仅监听 127.0.0.1</li>
+          <li><span class="check">✓</span> 不启用用量统计、请求日志和远程管理</li>
+          <li><span class="check">✓</span> OAuth 文件和本机密钥目录权限为 0700 / 0600</li>
+        </ul>
+      </article>
+    </section>
+
+    <section id="accounts" class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">PROVIDER LOGIN</p><h2>连接订阅账号</h2><p class="muted">登录成功后凭据保存在本机。连接第二个 ChatGPT Plus 时，再点一次登录并选择另一个账号。</p></div>
+        <button id="refresh-accounts" class="ghost">刷新</button>
+      </div>
+
+      <div class="providers">
+        <article class="provider card"><div class="provider-icon openai">O</div><div><h3>ChatGPT Plus</h3><p>Codex OAuth · GPT 模型</p></div><button class="provider-login primary" data-endpoint="codex-auth-url" data-provider="ChatGPT Plus">登录账号</button></article>
+        <article class="provider card"><div class="provider-icon claude">C</div><div><h3>Claude</h3><p>Claude Code OAuth</p></div><button class="provider-login" data-endpoint="anthropic-auth-url" data-provider="Claude">登录账号</button></article>
+        <article class="provider card"><div class="provider-icon gemini">G</div><div><h3>Gemini</h3><p>Antigravity OAuth</p></div><button class="provider-login" data-endpoint="antigravity-auth-url" data-provider="Gemini">登录账号</button></article>
+        <article class="provider card"><div class="provider-icon grok">X</div><div><h3>Grok</h3><p>xAI / Grok Build OAuth</p></div><button class="provider-login" data-endpoint="xai-auth-url" data-provider="Grok">登录账号</button></article>
+      </div>
+
+      <article class="card section-card">
+        <div class="section-title"><div><p class="eyebrow">LOCAL CREDENTIALS</p><h2>已连接账号</h2></div><span id="oauth-progress" class="status-note"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>厂商</th><th>账号</th><th>状态</th><th>请求</th><th></th></tr></thead>
+            <tbody id="account-table"><tr><td colspan="5" class="empty">连接管理接口后加载</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="relays" class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">OPENAI-COMPATIBLE</p><h2>第三方中转与 Qwen</h2><p class="muted">Qwen 当前通过兼容 API 接入；同一个表单也适用于 OpenRouter、自建中转或其他 OpenAI-compatible 服务。</p></div>
+        <button id="qwen-preset" class="ghost">填入 Qwen 预设</button>
+      </div>
+
+      <div class="grid relay-grid">
+        <form id="relay-form" class="card section-card">
+          <div class="form-grid">
+            <label>显示名称<input id="relay-name" required placeholder="例如 Qwen / My Relay"></label>
+            <label>模型前缀<input id="relay-prefix" placeholder="例如 qwen（可选）"></label>
+            <label class="wide">Base URL<input id="relay-url" type="url" required placeholder="https://…/v1"></label>
+            <label class="wide">上游 API key<input id="relay-key" type="password" required autocomplete="off" placeholder="只会写入本机配置"></label>
+            <label class="wide">模型映射<textarea id="relay-models" required rows="4" placeholder="qwen3-coder-plus=qwen-coder&#10;上游模型=客户端看到的名称"></textarea></label>
+          </div>
+          <div class="form-actions"><button type="submit" class="primary">保存中转</button><span class="hint">同名配置会被更新</span></div>
+        </form>
+
+        <article class="card section-card">
+          <div class="section-title"><div><p class="eyebrow">CONFIGURED</p><h2>已有中转</h2></div><button id="refresh-relays" class="ghost">刷新</button></div>
+          <div id="relay-list" class="relay-list"><p class="empty">尚未加载</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="debug" class="panel">
+      <div class="grid two">
+        <article class="card section-card">
+          <p class="eyebrow">MODEL TEST</p>
+          <h2>发送最小测试请求</h2>
+          <label>模型<select id="test-model"><option value="">先刷新模型列表</option></select></label>
+          <label>测试内容<textarea id="test-prompt" rows="3">只回复 OK</textarea></label>
+          <div class="form-actions"><button id="refresh-models" class="ghost">刷新模型</button><button id="run-test" class="primary">发送测试</button></div>
+          <pre id="test-output" class="output">等待测试</pre>
+        </article>
+
+        <article class="card section-card">
+          <p class="eyebrow">DIAGNOSTICS</p>
+          <h2>本机诊断</h2>
+          <label class="switch-row"><span><strong>Debug 日志</strong><small>仅排查问题时临时开启；默认关闭</small></span><input id="debug-toggle" type="checkbox"></label>
+          <button id="run-diagnostics" class="ghost full">刷新诊断信息</button>
+          <pre id="diagnostic-output" class="output">连接后可检查配置、账号和模型目录</pre>
+          <p class="hint">请求正文日志和用量统计保持关闭。终端中可查看服务运行日志。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    strategy:
+      matrix:
+        arch: [arm64, amd64]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: darwin
+      GOARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.0"
+          cache: true
+      - name: Build archive
+        shell: bash
+        run: |
+          go mod tidy
+          version="${GITHUB_REF_NAME}"
+          commit="${GITHUB_SHA::7}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p dist/package
+          go build -trimpath -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" -o dist/package/cliproxy-lite ./cmd/cliproxy-lite
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md dist/package/
+          tar -C dist/package -czf "dist/cliproxy-lite_${version}_darwin_${GOARCH}.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliproxy-lite-darwin-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  publish:
+    needs: macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --repo "$GITHUB_REPOSITORY" --generate-notes

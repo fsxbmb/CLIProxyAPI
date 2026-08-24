@@ -1,0 +1,10 @@
+.DS_Store
+/bin/
+/dist/
+/coverage.out
+/config.yaml
+/secrets.json
+/auth/
+/plugins/
+go.work
+go.work.sum
