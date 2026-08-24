@@ -1,125 +1,198 @@
 # CLIProxyAPI Lite
 
-面向 macOS 个人使用的本机 AI 模型网关。它把多个订阅账号和 OpenAI-compatible 上游统一成一个本地 API，让 Codex 之外的 Agent、CLI 和编辑器插件也能使用这些模型。
+CLIProxyAPI Lite 是一个**跨平台、本机运行的 AI API 网关**。它把多个 OAuth 账号和 OpenAI-compatible 上游统一为本机 API，让 Agent、CLI、编辑器插件和其他应用通过同一个 OpenAI-compatible 地址访问模型。
 
-这个仓库不是对上游源码的原样复制。它使用 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的 Go SDK 作为协议与 OAuth 引擎，在外围提供更小的本机启动器、安全默认值和一个无前端框架的内嵌 Web 管理界面。
+它不是必须安装的桌面 GUI 应用，而是一个包含内嵌 Web 管理界面的独立可执行服务：
 
-## 当前范围
+- API：`http://127.0.0.1:8317/v1`
+- Web UI：`http://127.0.0.1:8318/ui/`
+- 默认只监听回环地址，不接受局域网或公网访问
 
-| 能力 | 接入方式 | 状态 |
-| --- | --- | --- |
-| 两个 ChatGPT Plus | Codex OAuth；重复登录两个不同账号 | 支持 |
-| Claude | Claude Code OAuth | 支持 |
-| Gemini | Antigravity OAuth | 支持 |
-| Grok | xAI / Grok Build OAuth | 支持 |
-| Qwen | DashScope 或其他 OpenAI-compatible API | 支持 |
-| 第三方中转 | OpenAI-compatible Base URL + API key | 支持 |
-| 多账号路由 | Round-robin、失败切换、凭据冷却 | 支持 |
-| Web 管理 | 账号、中转、模型列表、最小请求测试、诊断 | 支持 |
+## 支持的平台
 
-刻意不包含云同步、远程管理、遥测、移动端、集群数据库、Docker 配置和上游远程下载的管理面板。动态插件默认关闭；上述厂商不依赖它。
+- macOS：arm64、amd64
+- Linux：amd64、arm64
+- Windows：amd64、arm64
 
-## 运行结构
+核心服务使用 Go 构建，Web UI 使用 `go:embed` 嵌入二进制，不需要 Node.js。发布包中包含对应平台的可执行文件；运行目标机器不需要安装 Go。
 
-- `http://127.0.0.1:8317`：给 Agent / CLI 使用的代理 API。
-- `http://127.0.0.1:8318/ui/`：只允许本机访问的管理界面。
-- `~/Library/Application Support/CLIProxyAPI-Lite`：配置、OAuth 文件和本机密钥。
+## 发布包是什么
 
-API 与 Web UI 是同一个进程中的两个本机监听器。Web UI 只把管理请求反向代理给本机 API，不会把密钥发送到其他服务器。
+Release 下载包是按平台生成的压缩包，不是传统安装向导：
 
-## 在 Mac 上开始使用
-
-要求 macOS 13 或更高版本，以及 Go 1.26。没有 Go 时可先安装：
-
-```bash
-brew install go
+```text
+cliproxy-lite_vX.Y.Z_darwin_arm64.tar.gz
+cliproxy-lite_vX.Y.Z_darwin_amd64.tar.gz
+cliproxy-lite_vX.Y.Z_linux_amd64.tar.gz
+cliproxy-lite_vX.Y.Z_linux_arm64.tar.gz
+cliproxy-lite_vX.Y.Z_windows_amd64.zip
+cliproxy-lite_vX.Y.Z_windows_arm64.zip
+SHA256SUMS
 ```
 
-然后构建并启动：
+压缩包包含独立可执行文件、示例配置、许可证和对应的安装/自启动脚本。它目前不是 `.app`、`.msi`、`.deb` 或 `.rpm`；如需要，这些格式可以在此基础上另行制作。
+
+## 快速开始
+
+### macOS / Linux
+
+解压后：
 
 ```bash
-git clone git@github.com:fsxbmb/CLIProxyAPI.git
-cd CLIProxyAPI
-make build
-./bin/cliproxy-lite init
-./bin/cliproxy-lite serve
+chmod +x cliproxy-lite
+./cliproxy-lite init
+./cliproxy-lite keys
+./cliproxy-lite serve
 ```
 
-服务就绪后会自动打开 Web UI。首次连接时，在另一个终端查看管理密钥：
+无桌面或不想自动打开浏览器时：
 
 ```bash
-./bin/cliproxy-lite keys
+./cliproxy-lite serve --no-open
 ```
 
-也可以安装到 `~/bin`：
+然后打开 `http://127.0.0.1:8318/ui/`，输入 `keys` 命令显示的 Management key。
+
+也可以从源码构建：
 
 ```bash
 ./install.sh
-cliproxy-lite serve
+~/.local/bin/cliproxy-lite init
+~/.local/bin/cliproxy-lite serve
 ```
 
-如果 shell 找不到命令，把 `~/bin` 加入 `PATH`。
+### Windows PowerShell
 
-## 连接两个 ChatGPT Plus
+解压后：
 
-1. 启动服务并在 Web UI 输入 Management key。
-2. 打开“OAuth 账号”，点击“ChatGPT Plus → 登录账号”。
-3. 在浏览器完成第一个账号授权。
-4. 再点一次登录，并在 OpenAI 登录页选择另一个 ChatGPT Plus 账号。
-5. 页面中的 `GPT Plus` 指标应显示 `2 / 2`。
+```powershell
+.\cliproxy-lite.exe init
+.\cliproxy-lite.exe keys
+.\cliproxy-lite.exe serve
+```
 
-OAuth 凭据只保存在本机 auth 目录。停用不会删除文件；删除只移除本机凭据，不会删除厂商账号。
+也可以使用安装脚本：
 
-## 添加 Qwen 或第三方中转
+```powershell
+.\scripts\install.ps1
+& "$env:LOCALAPPDATA\CLIProxyAPI-Lite\cliproxy-lite.exe" init
+& "$env:LOCALAPPDATA\CLIProxyAPI-Lite\cliproxy-lite.exe" serve
+```
 
-打开“中转与 Qwen”。Qwen 可以点击“填入 Qwen 预设”，补充 DashScope API key 并核对模型名。其他中转填写：
+源码树和 Release 压缩包都使用同一个 `scripts\install.ps1`。如果源码树中没有预编译的 `bin\cliproxy-lite.exe`，脚本会调用 Go 1.26 或更高版本进行构建。
 
-- 显示名称；
-- 可选模型前缀，用于避免同名模型冲突；
-- 以 `/v1` 结尾的 OpenAI-compatible Base URL；
-- 上游 API key；
-- 每行一个 `上游模型=客户端模型名` 的模型映射。
+## 默认数据目录
 
-保存后配置会热重载，无需重启。
+程序使用 Go 的 `os.UserConfigDir()` 选择平台目录：
 
-## 让 Agent / CLI 接入
+| 平台 | 默认目录 |
+| --- | --- |
+| macOS | `~/Library/Application Support/CLIProxyAPI-Lite` |
+| Linux | `~/.config/CLIProxyAPI-Lite` |
+| Windows | `%AppData%\CLIProxyAPI-Lite` |
 
-先运行 `cliproxy-lite keys` 获取本机 API key。
+也可以通过环境变量或命令参数指定：
 
-通用 OpenAI-compatible 客户端：
+```bash
+export CLIPROXY_LITE_HOME=/path/to/cliproxy-data
+cliproxy-lite serve --home /path/to/cliproxy-data
+```
+
+数据目录包含：
+
+```text
+config.yaml       # 本机服务配置
+secrets.json      # Management key 和本机 API key
+auth/             # OAuth 凭据
+plugins/          # 可选插件目录
+```
+
+不要把真实数据目录、OAuth 文件或 `secrets.json` 提交到 Git 或上传到公共网盘。
+
+## 网络代理
+
+所有平台都优先读取：
+
+```text
+HTTP_PROXY
+HTTPS_PROXY
+ALL_PROXY
+NO_PROXY
+```
+
+还可以在 `config.yaml` 中设置上游代理：
+
+```yaml
+proxy-url: "http://127.0.0.1:7890"
+```
+
+显式配置优先于自动探测。macOS 额外支持系统代理和 Clash Verge 配置探测；Windows/Linux 建议使用环境变量或 `proxy-url`。
+
+本机 API 和 Web UI 默认加入 `NO_PROXY`：`127.0.0.1,localhost,::1`。
+
+## 配置账号和中转
+
+打开 Web UI 后可以：
+
+- 登录 ChatGPT/Codex、Gemini/Antigravity、Grok 等 OAuth 账号；
+- 配置 DeepSeek、Qwen、OpenRouter 或其他 OpenAI-compatible API；
+- 查看可用模型；
+- 测试最小请求；
+- 管理账号启停；
+- 查看官方账号额度；
+- 对已知第三方 API 显示余额。
+
+第三方中转需要填写 Base URL、API key 和模型映射。余额接口因供应商不同而不同，已知供应商会自动匹配，其他供应商可以在 Web UI 中填写余额查询 URL 和 JSON 路径。
+
+## 让其他应用接入
+
+通用 OpenAI-compatible 客户端使用：
 
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:8317/v1"
 export OPENAI_API_KEY="sk-local_..."
 ```
 
-Codex 自定义 provider 示例：
+Python：
 
-```toml
-[model_providers.local_proxy]
-name = "CLIProxyAPI Local"
-base_url = "http://127.0.0.1:8317/v1"
-env_key = "CLIPROXY_API_KEY"
-wire_api = "responses"
+```python
+from openai import OpenAI
 
-[profiles.local_proxy]
-model_provider = "local_proxy"
-model = "gpt-5.4"
+client = OpenAI(
+    base_url="http://127.0.0.1:8317/v1",
+    api_key="sk-local_...",
+)
+
+response = client.chat.completions.create(
+    model="gpt-5.6-luna",
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(response.choices[0].message.content)
 ```
+
+## 自启动
+
+### macOS
 
 ```bash
-export CLIPROXY_API_KEY="sk-local_..."
-codex --profile local_proxy
+./scripts/install-macos-launchd.sh
 ```
 
-使用 Anthropic 协议的工具通常设置：
+### Linux systemd 用户服务
 
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8317"
-export ANTHROPIC_API_KEY="sk-local_..."
+./scripts/install-systemd.sh
 ```
 
-具体变量名取决于客户端；核心是把 Base URL 指向本机端口，并使用生成的本机 API key。
+### Windows 登录启动任务
+
+PowerShell：
+
+```powershell
+.\packaging\windows\install-task.ps1
+```
+
+这些脚本都只配置本机启动，不会开放公网端口。
 
 ## 命令
 
@@ -131,30 +204,47 @@ cliproxy-lite doctor [--home PATH]
 cliproxy-lite version
 ```
 
-`doctor` 会检查 YAML、目录权限、本机监听和远程管理设置。也可用 `CLIPROXY_LITE_HOME` 改变数据目录，便于测试或维护多套配置。
+## 安全说明
 
-## 安全与隐私
+- API 和 Web UI 默认只监听 `127.0.0.1`；
+- 远程管理默认禁用，程序拒绝不安全的监听地址；
+- OAuth 文件、Management key、本机 API key 都是敏感凭据；
+- 请求正文日志、遥测、用量统计和 pprof 默认关闭；
+- 不要将 8317/8318 暴露到公网；
+- 远程 Linux 机器建议使用 SSH 隧道，而不是修改 host 为 `0.0.0.0`。
 
-- 进程拒绝以 `0.0.0.0` 或局域网 IP 启动，并拒绝开启远程管理。
-- 数据目录使用 `0700`，配置、密钥和 OAuth 文件使用仅当前用户可读的权限。
-- Web UI 的 Management key 只存于 `sessionStorage`，关闭标签页后消失。
-- 请求正文日志、文件日志、用量统计和 pprof 默认关闭。
-- 上游自带的远程管理面板下载与自动更新被禁用。
-- 不要提交 `config.yaml`、`secrets.json` 或 auth 目录，也不要把本机端口暴露到公网。
-
-OAuth 转发和订阅账号的使用仍受各厂商条款约束。本项目定位为个人本机工具，不应用于共享账号、转售额度或向公网提供服务。
-
-## 开发
+Linux SSH 隧道示例：
 
 ```bash
-go mod tidy
+ssh -L 8317:127.0.0.1:8317 -L 8318:127.0.0.1:8318 user@server
+```
+
+然后在本机浏览器打开：
+
+```text
+http://127.0.0.1:8318/ui/
+```
+
+## 开发和构建
+
+要求 Go 1.26 或更高版本：
+
+```bash
+go mod download
 go test ./...
 go vet ./...
 make build
 ```
 
-当前固定使用 CLIProxyAPI SDK `v7.2.139`，避免上游接口变化导致不可重复构建。升级依赖时需要重新验证 OAuth、管理 API 和模型转换。
+交叉编译示例：
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/cliproxy-lite-linux-amd64 ./cmd/cliproxy-lite
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o dist/cliproxy-lite-windows-amd64.exe ./cmd/cliproxy-lite
+```
+
+推送 `v*` 标签后，GitHub Actions 会构建六个平台架构、生成压缩包并发布 `SHA256SUMS`。
 
 ## 许可证
 
-本仓库代码使用 MIT License。上游 CLIProxyAPI 及其依赖各自遵循对应许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本项目代码使用 MIT License。上游 CLIProxyAPI 及其依赖遵循各自许可证，详见 `THIRD_PARTY_NOTICES.md`。

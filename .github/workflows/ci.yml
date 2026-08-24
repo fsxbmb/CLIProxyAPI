@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: "0"
     steps:
@@ -20,10 +24,10 @@ jobs:
           go-version: "1.26.0"
           cache: true
       - name: Resolve modules
-        run: go mod tidy
+        run: go mod download
       - name: Test
         run: go test ./...
       - name: Vet
         run: go vet ./...
       - name: Build
-        run: make build
+        run: go build -trimpath ./cmd/cliproxy-lite

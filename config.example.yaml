@@ -1,6 +1,8 @@
-# Reference only. `cliproxy-lite init` generates real local secrets and paths.
+# Reference only. Prefer `cliproxy-lite init`, which generates local secrets
+# and platform-appropriate absolute paths automatically.
 host: "127.0.0.1"
 port: 8317
+proxy-url: "" # Optional HTTP/HTTPS/SOCKS5 outbound proxy
 
 tls:
   enable: false
@@ -13,13 +15,15 @@ remote-management:
   disable-control-panel: true
   disable-auto-update-panel: true
 
-auth-dir: "/Users/you/Library/Application Support/CLIProxyAPI-Lite/auth"
+# Use absolute paths when maintaining this file manually. The generated
+# config uses the OS user config directory automatically.
+auth-dir: "./auth"
 api-keys:
   - "replace-with-a-long-random-local-api-key"
 
 plugins:
   enabled: false
-  dir: "/Users/you/Library/Application Support/CLIProxyAPI-Lite/plugins"
+  dir: "./plugins"
 
 debug: false
 pprof:
@@ -30,6 +34,9 @@ logging-to-file: false
 usage-statistics-enabled: false
 request-log: false
 ws-auth: true
+passthrough-headers: false
+force-model-prefix: false
+save-cooldown-status: false
 
 request-retry: 2
 max-retry-credentials: 3

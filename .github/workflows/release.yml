@@ -7,47 +7,90 @@ on:
 permissions:
   contents: write
 
+env:
+  CGO_ENABLED: "0"
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  macos:
-    runs-on: macos-15
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        arch: [arm64, amd64]
-    env:
-      CGO_ENABLED: "0"
-      GOOS: darwin
-      GOARCH: ${{ matrix.arch }}
+        include:
+          - goos: darwin
+            goarch: arm64
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            archive: tar.gz
+          - goos: linux
+            goarch: amd64
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            archive: zip
+          - goos: windows
+            goarch: arm64
+            archive: zip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26.0"
           cache: true
-      - name: Build archive
-        shell: bash
+      - name: Build package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          go mod tidy
           version="${GITHUB_REF_NAME}"
           commit="${GITHUB_SHA::7}"
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          mkdir -p dist/package
-          go build -trimpath -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" -o dist/package/cliproxy-lite ./cmd/cliproxy-lite
-          cp README.md LICENSE THIRD_PARTY_NOTICES.md dist/package/
-          tar -C dist/package -czf "dist/cliproxy-lite_${version}_darwin_${GOARCH}.tar.gz" .
+          package_dir="dist/package"
+          mkdir -p "$package_dir"
+          binary="cliproxy-lite"
+          if [ "${GOOS}" = "windows" ]; then binary="cliproxy-lite.exe"; fi
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.buildDate=${build_date}" \
+            -o "$package_dir/$binary" ./cmd/cliproxy-lite
+          cp README.md LICENSE THIRD_PARTY_NOTICES.md config.example.yaml "$package_dir/"
+          mkdir -p "$package_dir/scripts" "$package_dir/packaging/systemd" "$package_dir/packaging/windows"
+          if [ "${GOOS}" = "windows" ]; then
+            cp scripts/install.ps1 "$package_dir/scripts/"
+            cp packaging/windows/install-task.ps1 "$package_dir/packaging/windows/"
+            (cd "$package_dir" && zip -q -r "../cliproxy-lite_${version}_${GOOS}_${GOARCH}.zip" .)
+          else
+            cp install.sh "$package_dir/"
+            cp scripts/install-systemd.sh scripts/install-macos-launchd.sh "$package_dir/scripts/"
+            cp packaging/systemd/cliproxy-lite.service "$package_dir/packaging/systemd/"
+            tar -C "$package_dir" -czf "dist/cliproxy-lite_${version}_${GOOS}_${GOARCH}.tar.gz" .
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: cliproxy-lite-darwin-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          name: cliproxy-lite-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.${{ matrix.archive }}
+          if-no-files-found: error
 
   publish:
-    needs: macos
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz *.zip > SHA256SUMS
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes

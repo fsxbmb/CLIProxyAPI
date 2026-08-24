@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fsxbmb/CLIProxyAPI/internal/admin"
+	"github.com/fsxbmb/CLIProxyAPI/internal/outboundproxy"
 	"github.com/fsxbmb/CLIProxyAPI/internal/state"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
@@ -53,7 +54,7 @@ func Run(ctx context.Context, args []string, info BuildInfo, stdout, stderr io.W
 func serve(ctx context.Context, args []string, info BuildInfo, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	home := flags.String("home", "", "data directory (default: macOS Application Support)")
+	home := flags.String("home", "", "data directory (default: OS user config directory)")
 	uiPort := flags.Int("ui-port", 8318, "local Web UI port")
 	noOpen := flags.Bool("no-open", false, "do not open the Web UI in a browser")
 	if err := flags.Parse(args); err != nil {
@@ -61,6 +62,12 @@ func serve(ctx context.Context, args []string, info BuildInfo, stdout, stderr io
 	}
 	if *uiPort < 1 || *uiPort > 65535 {
 		return fmt.Errorf("invalid UI port %d", *uiPort)
+	}
+	proxy, err := outboundproxy.Configure()
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: outbound proxy detection failed: %v\n", err)
+	} else if proxy.Source != "" {
+		fmt.Fprintf(stdout, "Outbound proxy: %s (%s)\n", proxy.URL(), proxy.Source)
 	}
 
 	paths, err := state.Resolve(*home)
@@ -74,6 +81,13 @@ func serve(ctx context.Context, args []string, info BuildInfo, stdout, stderr io
 	cfg, err := sdkconfig.LoadConfig(paths.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if strings.TrimSpace(cfg.ProxyURL) == "" {
+		if proxyURL := proxy.URL(); proxyURL != "" {
+			// The upstream SDK's uTLS and WebSocket clients use this field instead
+			// of the standard HTTP proxy environment variables.
+			cfg.ProxyURL = proxyURL
+		}
 	}
 	if !state.IsLoopbackHost(cfg.Host) {
 		return fmt.Errorf("refusing to bind API host %q; use 127.0.0.1, localhost, or ::1", cfg.Host)
@@ -210,14 +224,24 @@ func doctor(args []string, stdout, stderr io.Writer) error {
 }
 
 func openBrowser(target string) {
-	if runtime.GOOS != "darwin" {
-		return
+	var command string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		command = "open"
+		args = []string{target}
+	case "windows":
+		command = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", target}
+	default:
+		command = "xdg-open"
+		args = []string{target}
 	}
-	_ = exec.Command("open", target).Start()
+	_ = exec.Command(command, args...).Start()
 }
 
 func printHelp(out io.Writer) {
-	fmt.Fprintln(out, `CLIProxyAPI-Lite — local multi-provider AI proxy for macOS
+	fmt.Fprintln(out, `CLIProxyAPI-Lite — local multi-provider AI proxy
 
 Usage:
   cliproxy-lite [serve] [--home PATH] [--ui-port 8318] [--no-open]

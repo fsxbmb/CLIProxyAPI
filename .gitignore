@@ -6,5 +6,8 @@
 /secrets.json
 /auth/
 /plugins/
+.DS_Store
+*.tar.gz
+*.zip
 go.work
 go.work.sum

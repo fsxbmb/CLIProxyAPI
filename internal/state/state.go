@@ -35,14 +35,20 @@ func Resolve(explicitHome string) (Paths, error) {
 		root = strings.TrimSpace(os.Getenv(envHome))
 	}
 	if root == "" {
-		userHome, err := os.UserHomeDir()
+		configDir, err := os.UserConfigDir()
 		if err != nil {
-			return Paths{}, fmt.Errorf("resolve user home: %w", err)
+			return Paths{}, fmt.Errorf("resolve user config directory: %w", err)
 		}
-		if runtime.GOOS == "darwin" {
-			root = filepath.Join(userHome, "Library", "Application Support", "CLIProxyAPI-Lite")
-		} else {
-			root = filepath.Join(userHome, ".config", "cliproxyapi-lite")
+		root = filepath.Join(configDir, "CLIProxyAPI-Lite")
+		// Keep compatibility with the original Linux path used by earlier
+		// releases, without affecting fresh installations.
+		if runtime.GOOS == "linux" {
+			legacy := filepath.Join(configDir, "cliproxyapi-lite")
+			if _, legacyErr := os.Stat(legacy); legacyErr == nil {
+				if _, currentErr := os.Stat(root); errors.Is(currentErr, fs.ErrNotExist) {
+					root = legacy
+				}
+			}
 		}
 	}
 	abs, err := filepath.Abs(root)
@@ -63,7 +69,7 @@ func Ensure(paths Paths) (Secrets, bool, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return Secrets{}, false, fmt.Errorf("create %s: %w", dir, err)
 		}
-		if err := os.Chmod(dir, 0o700); err != nil {
+		if err := securePrivate(dir, true); err != nil {
 			return Secrets{}, false, fmt.Errorf("secure %s: %w", dir, err)
 		}
 	}
@@ -88,7 +94,7 @@ func loadOrCreateSecrets(path string) (Secrets, bool, error) {
 		if strings.TrimSpace(secrets.ManagementKey) == "" || strings.TrimSpace(secrets.APIKey) == "" {
 			return Secrets{}, false, errors.New("secrets file is missing required keys")
 		}
-		if err = os.Chmod(path, 0o600); err != nil {
+		if err = securePrivate(path, false); err != nil {
 			return Secrets{}, false, fmt.Errorf("secure secrets file: %w", err)
 		}
 		return secrets, false, nil
@@ -112,14 +118,17 @@ func loadOrCreateSecrets(path string) (Secrets, bool, error) {
 	}
 	encoded = append(encoded, '\n')
 	if err = writeExclusive(path, encoded, 0o600); err != nil {
-		return Secrets{}, false, fmt.Errorf("create secrets file: %w", err)
+		return Secrets{}, false, err
+	}
+	if err = securePrivate(path, false); err != nil {
+		return Secrets{}, false, fmt.Errorf("secure secrets file: %w", err)
 	}
 	return secrets, true, nil
 }
 
 func ensureConfig(paths Paths, secrets Secrets) error {
 	if _, err := os.Stat(paths.ConfigFile); err == nil {
-		if err = os.Chmod(paths.ConfigFile, 0o600); err != nil {
+		if err = securePrivate(paths.ConfigFile, false); err != nil {
 			return fmt.Errorf("secure config file: %w", err)
 		}
 		return nil
@@ -131,6 +140,9 @@ func ensureConfig(paths Paths, secrets Secrets) error {
 	if err := writeExclusive(paths.ConfigFile, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("create config file: %w", err)
 	}
+	if err := securePrivate(paths.ConfigFile, false); err != nil {
+		return fmt.Errorf("secure config file: %w", err)
+	}
 	return nil
 }
 
@@ -139,6 +151,7 @@ func defaultConfig(paths Paths, secrets Secrets) string {
 # Secrets are generated locally and this file is never meant to be committed.
 host: "127.0.0.1"
 port: 8317
+proxy-url: ""
 
 tls:
   enable: false
@@ -230,23 +243,5 @@ func IsLoopbackHost(host string) bool {
 }
 
 func ValidatePermissions(paths Paths) error {
-	checks := []struct {
-		path string
-		want fs.FileMode
-	}{
-		{paths.Root, 0o700},
-		{paths.AuthDir, 0o700},
-		{paths.SecretsFile, 0o600},
-		{paths.ConfigFile, 0o600},
-	}
-	for _, check := range checks {
-		info, err := os.Stat(check.path)
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", check.path, err)
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			return fmt.Errorf("%s permissions are %04o; expected no group/other access", check.path, info.Mode().Perm())
-		}
-	}
-	return nil
+	return validatePrivate(paths)
 }

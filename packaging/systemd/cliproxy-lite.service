@@ -1,0 +1,14 @@
+[Unit]
+Description=CLIProxyAPI Lite local AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cliproxy-lite serve --no-open
+Restart=on-failure
+RestartSec=5
+Environment=NO_PROXY=127.0.0.1,localhost,::1
+
+[Install]
+WantedBy=default.target

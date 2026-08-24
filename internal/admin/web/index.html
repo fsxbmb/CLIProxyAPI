@@ -94,11 +94,14 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
       </div>
 
       <article class="card section-card">
-        <div class="section-title"><div><p class="eyebrow">LOCAL CREDENTIALS</p><h2>已连接账号</h2></div><span id="oauth-progress" class="status-note"></span></div>
+        <div class="section-title">
+          <div><p class="eyebrow">LOCAL CREDENTIALS</p><h2>已连接账号与额度</h2><p class="muted">GPT、Gemini、Grok 额度自动刷新；第三方中转不参与统计。</p></div>
+          <div class="account-heading-actions"><span id="oauth-progress" class="status-note"></span><span id="quota-updated" class="quota-updated"></span><button id="refresh-quotas" class="ghost">刷新额度</button></div>
+        </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>厂商</th><th>账号</th><th>状态</th><th>请求</th><th></th></tr></thead>
-            <tbody id="account-table"><tr><td colspan="5" class="empty">连接管理接口后加载</td></tr></tbody>
+            <thead><tr><th>厂商</th><th>账号</th><th>状态</th><th>本地请求</th><th>编程额度</th><th></th></tr></thead>
+            <tbody id="account-table"><tr><td colspan="6" class="empty">连接管理接口后加载</td></tr></tbody>
           </table>
         </div>
       </article>
@@ -117,6 +120,9 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
             <label>模型前缀<input id="relay-prefix" placeholder="例如 qwen（可选）"></label>
             <label class="wide">Base URL<input id="relay-url" type="url" required placeholder="https://…/v1"></label>
             <label class="wide">上游 API key<input id="relay-key" type="password" required autocomplete="off" placeholder="只会写入本机配置"></label>
+            <label>余额查询 URL<input id="relay-balance-url" type="url" placeholder="可选，如 https://api.deepseek.com/user/balance"></label>
+            <label>余额 JSON 路径<input id="relay-balance-path" placeholder="可选，如 balance_infos[0].total_balance"></label>
+            <label>货币单位<input id="relay-balance-currency" placeholder="可选，如 CNY / USD"></label>
             <label class="wide">模型映射<textarea id="relay-models" required rows="4" placeholder="qwen3-coder-plus=qwen-coder&#10;上游模型=客户端看到的名称"></textarea></label>
           </div>
           <div class="form-actions"><button type="submit" class="primary">保存中转</button><span class="hint">同名配置会被更新</span></div>
