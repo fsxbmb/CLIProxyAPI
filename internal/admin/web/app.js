@@ -33,7 +33,8 @@ async function decodeResponse(response) {
     try { data = JSON.parse(text); } catch { data = { text }; }
   }
   if (!response.ok) {
-    const message = data.error || data.message || data.details || `${response.status} ${response.statusText}`;
+    const rawMessage = data.error?.message || data.error || data.message || data.details || `${response.status} ${response.statusText}`;
+    const message = typeof rawMessage === "string" ? rawMessage : JSON.stringify(rawMessage);
     throw new Error(message);
   }
   return data;
@@ -775,7 +776,7 @@ async function runModelTest() {
   let elapsed = 0;
   $("#test-output").textContent = "请求中… 0 秒";
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 120000);
   const ticker = setInterval(() => {
     elapsed += 1;
     $("#test-output").textContent = `请求中… ${elapsed} 秒`;
@@ -790,7 +791,7 @@ async function runModelTest() {
     $("#test-output").textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
     notify("模型请求成功");
   } catch (error) {
-    const message = error.name === "AbortError" ? "请求超过 45 秒，已取消" : error.message;
+    const message = error.name === "AbortError" ? "请求超过 120 秒，已取消" : error.message;
     $("#test-output").textContent = `失败：${message}`;
     notify(`测试失败：${message}`, true);
   } finally {
