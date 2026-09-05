@@ -44,9 +44,9 @@
 
     <section id="overview" class="panel active">
       <div class="metrics">
-        <article class="metric card"><span>OAuth 账号</span><strong id="account-count">—</strong><small>自动轮询与故障切换</small></article>
-        <article class="metric card"><span>GPT Plus</span><strong id="codex-count">— / 2</strong><small>目标：连接两个账号</small></article>
-        <article class="metric card"><span>兼容中转</span><strong id="relay-count">—</strong><small>OpenAI-compatible</small></article>
+        <article class="metric card"><span>AI 账号总数</span><strong id="account-count">—</strong><small id="account-count-note">OAuth 与中转/API 合计</small></article>
+        <article class="metric card"><span>OAuth 账号</span><strong id="codex-count">—</strong><small id="codex-count-note">自动轮询与故障切换</small></article>
+        <article class="metric card"><span>中转 / API</span><strong id="relay-count">—</strong><small id="relay-count-note">OpenAI-compatible</small></article>
         <article class="metric card"><span>可见模型</span><strong id="model-count">—</strong><small>统一模型目录</small></article>
       </div>
 
@@ -95,12 +95,12 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
 
       <article class="card section-card">
         <div class="section-title">
-          <div><p class="eyebrow">LOCAL CREDENTIALS</p><h2>已连接账号与额度</h2><p class="muted">GPT、Gemini、Grok 额度自动刷新；第三方中转不参与统计。</p></div>
+          <div><p class="eyebrow">LOCAL CREDENTIALS</p><h2>已连接账号与额度</h2><p class="muted">GPT、Claude、Gemini、Grok 额度自动刷新；第三方中转不参与统计。</p></div>
           <div class="account-heading-actions"><span id="oauth-progress" class="status-note"></span><span id="quota-updated" class="quota-updated"></span><button id="refresh-quotas" class="ghost">刷新额度</button></div>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>厂商</th><th>账号</th><th>状态</th><th>本地请求</th><th>编程额度</th><th></th></tr></thead>
+            <thead><tr><th>厂商</th><th>账号</th><th>状态</th><th title="上行：本次服务启动后的请求计数（重启归零）；下行：本机跨重启累计">本次 / 累计请求</th><th>编程额度</th><th></th></tr></thead>
             <tbody id="account-table"><tr><td colspan="6" class="empty">连接管理接口后加载</td></tr></tbody>
           </table>
         </div>

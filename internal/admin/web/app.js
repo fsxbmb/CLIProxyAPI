@@ -200,6 +200,28 @@ function resetFromWindow(window) {
   return after === null ? null : new Date(Date.now() + after * 1000);
 }
 
+// 展示“本次启动 / 累计”两组请求计数。
+// runtime_* 为本次进程计数；success/failed 为跨重启累计（旧后端无 runtime_* 时两者一致）。
+function appendRequestCounts(cell, account) {
+  const num = (value, fallback) => Number(value ?? fallback ?? 0);
+  cell.className = "request-counts";
+  const line = (label, ok, bad, hint) => {
+    const wrap = document.createElement("div");
+    wrap.className = "request-line";
+    wrap.title = hint;
+    const tag = document.createElement("span");
+    tag.className = "quota-status";
+    tag.textContent = label;
+    const value = document.createElement("span");
+    value.textContent = bad ? `${ok} 成功 / ${bad} 失败` : `${ok} 成功`;
+    wrap.append(tag, value);
+    cell.append(wrap);
+  };
+  line("本次", num(account.runtime_success, account.success), num(account.runtime_failed, account.failed),
+    "本次服务启动后的请求计数，重启后归零");
+  line("累计", num(account.success), num(account.failed), "本机跨重启的累计请求计数");
+}
+
 function parseCodexQuota(payload) {
   const limits = [
     ["Codex", payload?.rate_limit ?? payload?.rateLimit],
@@ -222,17 +244,39 @@ function parseCodexQuota(payload) {
 
 function parseClaudeQuota(payload) {
   const rows = [];
+  const seen = new Set();
+  const addWindow = (label, utilization, resetRaw, lockedReason = "") => {
+    const usedPercent = numberValue(utilization);
+    if (usedPercent === null || seen.has(label)) return;
+    seen.add(label);
+    rows.push({
+      label,
+      remaining: 100 - Math.max(0, Math.min(100, usedPercent)),
+      reset: resetRaw ? new Date(resetRaw) : null,
+      lockedReason,
+    });
+  };
   const windows = [
     ["5 小时", payload?.five_hour ?? payload?.fiveHour],
     ["每周", payload?.seven_day ?? payload?.sevenDay],
+    ["每周 · OAuth 应用", payload?.seven_day_oauth_apps ?? payload?.sevenDayOauthApps],
     ["每周 · Opus", payload?.seven_day_opus ?? payload?.sevenDayOpus],
     ["每周 · Sonnet", payload?.seven_day_sonnet ?? payload?.sevenDaySonnet],
   ];
   for (const [label, window] of windows) {
     if (!window) continue;
-    const utilization = numberValue(window.utilization);
-    if (utilization === null) continue;
-    rows.push({ label, remaining: 100 - Math.max(0, Math.min(1, utilization)) * 100, reset: window.resets_at || window.resetsAt ? new Date(window.resets_at || window.resetsAt) : null });
+    addWindow(label, window.utilization, window.resets_at ?? window.resetsAt, window.locked_reason ?? window.lockedReason);
+  }
+  const limitLabels = {
+    session: "5 小时",
+    weekly_all: "每周",
+    weekly_oauth_apps: "每周 · OAuth 应用",
+    weekly_opus: "每周 · Opus",
+    weekly_sonnet: "每周 · Sonnet",
+  };
+  for (const limit of payload?.limits || []) {
+    const label = limitLabels[limit.kind] || limit.kind || limit.group;
+    if (label) addWindow(label, limit.percent, limit.resets_at ?? limit.resetsAt);
   }
   const extra = payload?.extra_usage ?? payload?.extraUsage;
   const extraUsed = numberValue(extra?.used_credits ?? extra?.usedCredits);
@@ -279,19 +323,17 @@ function parseXaiQuota(payload, legacyPayload = null) {
   }
   if (limit !== null && limit > 0 && used !== null) {
     rows.push({ label: "每月包含额度", remaining: 100 - (Math.min(used, limit) / limit * 100), reset: null });
-  } else {
-    rows.push({ label: "订阅模型", value: "grok-4.6 / grok-4.5", reset: null });
-    if (used !== null) rows.push({ label: "本月已用", value: `${used} credits`, reset: null });
+  } else if (used !== null) {
+    rows.push({ label: "本月已用", value: `${used} credits`, reset: null });
   }
   const period = primary.currentPeriod ?? primary.current_period ?? {};
   const resetRaw = period.end || primary.billingPeriodEnd || primary.billing_period_end || legacyConfig?.billingPeriodEnd || legacyConfig?.billing_period_end;
   const reset = resetRaw ? new Date(resetRaw) : null;
   rows.forEach((row) => { row.reset ||= reset; });
   const unified = Boolean(primary.isUnifiedBillingUser ?? primary.is_unified_billing_user);
-  const plan = unified ? "SuperGrok · 订阅已激活" : "Grok";
-  const note = unified
-    ? "SuperGrok 订阅账户按周动态重置，官方接口不限制固定的百分比百分上限。"
-    : "";
+  const plan = unified ? "SuperGrok · 统一计费" : "Grok";
+  const hasPercent = rows.some((row) => row.remaining !== undefined && row.remaining !== null);
+  const note = hasPercent ? "" : "官方接口未返回额度上限，当前只能显示已用 credits，无法计算剩余百分比。";
   return { plan, rows, note, reset };
 }
 
@@ -414,14 +456,17 @@ async function fetchAccountQuota(account) {
     const headers = {
       Authorization: "Bearer $TOKEN$", "x-xai-token-auth": "xai-grok-cli", "x-grok-client-version": "0.2.91", Accept: "*/*", "User-Agent": "grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)",
     };
-    const [weekly, monthly] = await Promise.allSettled([
-      vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers),
-      vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing", headers),
-    ]);
-    const weeklyBody = weekly.status === "fulfilled" ? weekly.value.body : null;
-    const monthlyBody = monthly.status === "fulfilled" ? monthly.value.body : null;
-    if (!weeklyBody && !monthlyBody) throw weekly.reason || monthly.reason || new Error("Grok 额度查询失败");
-    return parseXaiQuota(weeklyBody || monthlyBody, monthlyBody && monthlyBody !== weeklyBody ? monthlyBody : null);
+    let monthlyBody = null;
+    let monthlyError = null;
+    try {
+      monthlyBody = (await vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing", headers)).body;
+    } catch (error) { monthlyError = error; }
+    let creditsBody = null;
+    try {
+      creditsBody = (await vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers)).body;
+    } catch { /* The credits-format endpoint is optional and intermittently returns 502. */ }
+    if (!monthlyBody && !creditsBody) throw monthlyError || new Error("Grok 额度查询失败");
+    return parseXaiQuota(creditsBody || monthlyBody, monthlyBody && monthlyBody !== creditsBody ? monthlyBody : null);
   }
   throw new Error("该供应商不支持额度预览");
 }
@@ -510,6 +555,8 @@ async function loadQuotas({ silent = false } = {}) {
         state.quotas[accountKey(account)] = { status: "error", error: error.message || "额度查询失败" };
       }
       renderQuotas();
+      // plan 信息来自额度接口，到货后重算 Plus/Free 拆分。
+      renderOverviewCounts();
     }));
     const failed = results.filter((result) => result.status === "rejected").length + targets.filter((account) => state.quotas[accountKey(account)]?.status === "error").length;
     $("#quota-updated").textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
@@ -551,7 +598,7 @@ function renderAccounts() {
     badge.textContent = account.disabled ? "已停用" : (account.status || "可用");
     status.append(badge);
     const requests = document.createElement("td");
-    requests.textContent = `${account.success || 0} 成功 / ${account.failed || 0} 失败`;
+    appendRequestCounts(requests, account);
     const quota = document.createElement("td");
     quota.className = "account-quota";
     appendQuotaContent(quota, account);
@@ -581,16 +628,48 @@ function renderAccounts() {
     badge.className = `badge${relay.disabled ? " disabled" : ""}`;
     badge.textContent = relay.disabled ? "已停用" : "可用";
     status.append(badge);
-    const requests = document.createElement("td"); requests.textContent = "—";
+    const requests = document.createElement("td"); requests.className = "request-counts"; requests.textContent = "—";
     const quota = document.createElement("td"); quota.className = "account-quota";
     appendQuotaContent(quota, { name: relay.name, provider: "relay", email: relay.name, disabled: relay.disabled, auth_index: authIndex, balance: balanceConfigFor(relay) });
     const actions = document.createElement("td");
     row.append(provider, identity, status, requests, quota, actions);
     table.append(row);
   });
-  const codex = state.accounts.filter((item) => String(item.provider || item.type).toLowerCase() === "codex").length;
-  $("#account-count").textContent = String(state.accounts.length);
-  $("#codex-count").textContent = `${codex} / 2`;
+  renderOverviewCounts();
+}
+
+// 把各厠商的内部标识映射成界面叫法。
+// Codex 同时包含 Plus/Free，只能靠额度接口返回的 plan 区分；额度未到货时统一计为 GPT。
+function accountKindLabel(account) {
+  const kind = String(account.provider || account.type || "").toLowerCase();
+  if (kind === "codex") {
+    const plan = String(state.quotas[accountKey(account)]?.data?.plan || "").toLowerCase();
+    const tier = ["free", "plus", "pro", "team"].find((name) => plan.includes(name));
+    return tier ? `GPT ${tier[0].toUpperCase()}${tier.slice(1)}` : "GPT";
+  }
+  return { claude: "Claude Pro", antigravity: "Gemini Pro", gemini: "Gemini Pro", xai: "Grok", grok: "Grok" }[kind]
+    || (kind ? kind.toUpperCase() : "其他");
+}
+
+// 按实际配置统计各类 AI 工具数量，而不是写死的目标值。
+function renderOverviewCounts() {
+  const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+  const tally = (items, labeller) => {
+    const counts = new Map();
+    items.forEach((item) => { const key = labeller(item); counts.set(key, (counts.get(key) || 0) + 1); });
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([label, n]) => `${n} ${label}`).join(" · ");
+  };
+  const oauth = state.accounts.length;
+  const relay = state.relays.length;
+
+  setText("#account-count", String(oauth + relay));
+  setText("#account-count-note", `${oauth} 个 OAuth · ${relay} 个 中转/API`);
+  setText("#codex-count", String(oauth));
+  setText("#codex-count-note", oauth ? tally(state.accounts, accountKindLabel) : "尚未连接账号");
+  setText("#relay-count-note", relay
+    ? tally(state.relays, (item) => (item._source === "codex-api-key" ? "中转站" : item.name || "API"))
+    : "尚未配置中转");
 }
 
 async function toggleAccount(account) {
@@ -748,6 +827,7 @@ function renderRelays() {
     list.append(item);
   });
   $("#relay-count").textContent = String(state.relays.length);
+  renderOverviewCounts();
 }
 
 function editRelay(index) {

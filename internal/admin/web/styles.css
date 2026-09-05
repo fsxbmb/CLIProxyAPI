@@ -143,6 +143,9 @@ td:last-child, th:last-child { text-align: right; }
 
 .account-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
 .account-quota { width: 330px; min-width: 270px; }
+.request-counts { white-space: nowrap; font-size: 12px; }
+.request-line { display: flex; align-items: baseline; gap: 6px; }
+.request-line + .request-line { margin-top: 2px; color: var(--muted); }
 .quota-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .quota-meter small, .quota-note, .quota-updated { color: var(--muted); font-size: 11px; }
 .quota-updated { white-space: nowrap; }
