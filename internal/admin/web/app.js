@@ -662,11 +662,16 @@ function renderOverviewCounts() {
   };
   const oauth = state.accounts.length;
   const relay = state.relays.length;
+  // 免费套餐不计入会员数；额度未到货时无法判断，此时暂归为会员。
+  const members = state.accounts.filter((item) => !accountKindLabel(item).endsWith(" Free"));
+  const free = oauth - members.length;
 
   setText("#account-count", String(oauth + relay));
   setText("#account-count-note", `${oauth} 个 OAuth · ${relay} 个 中转/API`);
-  setText("#codex-count", String(oauth));
-  setText("#codex-count-note", oauth ? tally(state.accounts, accountKindLabel) : "尚未连接账号");
+  setText("#codex-count", String(members.length));
+  setText("#codex-count-note", members.length
+    ? tally(members, accountKindLabel) + (free ? ` · 另 ${free} 个免费` : "")
+    : "尚未连接会员账号");
   setText("#relay-count-note", relay
     ? tally(state.relays, (item) => (item._source === "codex-api-key" ? "中转站" : item.name || "API"))
     : "尚未配置中转");
