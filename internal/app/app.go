@@ -106,10 +106,11 @@ func serve(ctx context.Context, args []string, info BuildInfo, stdout, stderr io
 	apiOrigin := fmt.Sprintf("http://%s:%d", apiHost, cfg.Port)
 	apiBase := apiOrigin + "/v1"
 	adminURL := fmt.Sprintf("http://127.0.0.1:%d/ui/", *uiPort)
-	ui, err := admin.New(
+	ui, err := admin.NewWithRequestCounts(
 		net.JoinHostPort("127.0.0.1", fmt.Sprint(*uiPort)),
 		apiOrigin,
 		admin.Meta{Version: info.Version, APIBase: apiBase, AdminURL: adminURL},
+		admin.RequestCountsConfig{Path: paths.RequestCountsFile, ManagementKey: secrets.ManagementKey},
 	)
 	if err != nil {
 		return err

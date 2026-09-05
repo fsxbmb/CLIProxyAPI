@@ -26,18 +26,28 @@ type Meta struct {
 }
 
 type Server struct {
-	address string
-	target  *url.URL
-	meta    Meta
-	http    *http.Server
+	address       string
+	target        *url.URL
+	meta          Meta
+	http          *http.Server
+	counts        *requestCountStore
+	managementKey string
 }
 
 func New(address, target string, meta Meta) (*Server, error) {
+	return NewWithRequestCounts(address, target, meta, RequestCountsConfig{})
+}
+
+func NewWithRequestCounts(address, target string, meta Meta, countsConfig RequestCountsConfig) (*Server, error) {
 	targetURL, err := url.Parse(target)
 	if err != nil {
 		return nil, fmt.Errorf("parse API target: %w", err)
 	}
-	server := &Server{address: address, target: targetURL, meta: meta}
+	counts, err := newRequestCountStore(countsConfig.Path)
+	if err != nil {
+		return nil, err
+	}
+	server := &Server{address: address, target: targetURL, meta: meta, counts: counts, managementKey: strings.TrimSpace(countsConfig.ManagementKey)}
 	server.http = &http.Server{
 		Addr:              address,
 		Handler:           server.Handler(),
@@ -52,6 +62,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("start Web UI on %s: %w", s.address, err)
 	}
+	go s.pollRequestCounts(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -111,6 +122,9 @@ func (s *Server) reverseProxy(fromPrefix, toPrefix string) *httputil.ReverseProx
 			request.URL.Path += "/"
 		}
 		request.Host = s.target.Host
+	}
+	if fromPrefix == "/api/" && toPrefix == "/v0/management/" && s.counts != nil {
+		proxy.ModifyResponse = s.decorateAuthFilesResponse
 	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {

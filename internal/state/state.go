@@ -17,11 +17,12 @@ import (
 const envHome = "CLIPROXY_LITE_HOME"
 
 type Paths struct {
-	Root        string
-	ConfigFile  string
-	SecretsFile string
-	AuthDir     string
-	PluginsDir  string
+	Root              string
+	ConfigFile        string
+	SecretsFile       string
+	AuthDir           string
+	PluginsDir        string
+	RequestCountsFile string
 }
 
 type Secrets struct {
@@ -56,11 +57,12 @@ func Resolve(explicitHome string) (Paths, error) {
 		return Paths{}, fmt.Errorf("resolve data directory: %w", err)
 	}
 	return Paths{
-		Root:        abs,
-		ConfigFile:  filepath.Join(abs, "config.yaml"),
-		SecretsFile: filepath.Join(abs, "secrets.json"),
-		AuthDir:     filepath.Join(abs, "auth"),
-		PluginsDir:  filepath.Join(abs, "plugins"),
+		Root:              abs,
+		ConfigFile:        filepath.Join(abs, "config.yaml"),
+		SecretsFile:       filepath.Join(abs, "secrets.json"),
+		AuthDir:           filepath.Join(abs, "auth"),
+		PluginsDir:        filepath.Join(abs, "plugins"),
+		RequestCountsFile: filepath.Join(abs, "request-counts.json"),
 	}, nil
 }
 
