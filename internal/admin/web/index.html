@@ -38,7 +38,7 @@
     <nav class="tabs" aria-label="管理页面">
       <button class="tab active" data-tab="overview">总览</button>
       <button class="tab" data-tab="accounts">OAuth 账号</button>
-      <button class="tab" data-tab="relays">中转与 Qwen</button>
+      <button class="tab" data-tab="relays">中转</button>
       <button class="tab" data-tab="debug">调试</button>
     </nav>
 
@@ -105,27 +105,44 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
           </table>
         </div>
       </article>
+
+      <div class="grid two model-catalog-grid">
+        <article class="card section-card">
+          <div class="section-title">
+            <div><p class="eyebrow">GROK MODEL CATALOG</p><h2>当前可用的 Grok 模型</h2><p class="muted">来自实时 `/v1/models`；点击模型可直接进入调试页测试。</p></div>
+            <span id="grok-model-count" class="quota-status">等待加载</span>
+          </div>
+          <div id="grok-model-list" class="model-chip-list"><p class="empty">连接管理接口后加载</p></div>
+        </article>
+
+        <article class="card section-card">
+          <div class="section-title">
+            <div><p class="eyebrow">CLAUDE MODEL CATALOG</p><h2>当前可用的 Claude 模型</h2><p class="muted">来自实时 `/v1/models`；点击模型可直接进入调试页测试。</p></div>
+            <span id="claude-model-count" class="quota-status">等待加载</span>
+          </div>
+          <div id="claude-model-list" class="model-chip-list"><p class="empty">连接管理接口后加载</p></div>
+        </article>
+      </div>
     </section>
 
     <section id="relays" class="panel">
       <div class="section-heading">
-        <div><p class="eyebrow">OPENAI-COMPATIBLE</p><h2>第三方中转与 Qwen</h2><p class="muted">Qwen 当前通过兼容 API 接入；同一个表单也适用于 OpenRouter、自建中转或其他 OpenAI-compatible 服务。</p></div>
-        <button id="qwen-preset" class="ghost">填入 Qwen 预设</button>
+        <div><p class="eyebrow">OPENAI-COMPATIBLE</p><h2>第三方中转</h2><p class="muted">管理 OpenAI-compatible API 中转，以及已配置的 Codex API 中转。</p></div>
       </div>
 
       <div class="grid relay-grid">
         <form id="relay-form" class="card section-card">
           <div class="form-grid">
-            <label>显示名称<input id="relay-name" required placeholder="例如 Qwen / My Relay"></label>
+            <label>显示名称<input id="relay-name" required placeholder="例如 CCH API / My Relay"></label>
             <label>模型前缀<input id="relay-prefix" placeholder="例如 qwen（可选）"></label>
             <label class="wide">Base URL<input id="relay-url" type="url" required placeholder="https://…/v1"></label>
-            <label class="wide">上游 API key<input id="relay-key" type="password" required autocomplete="off" placeholder="只会写入本机配置"></label>
+            <label class="wide">上游 API key<input id="relay-key" type="text" required autocomplete="off" spellcheck="false" placeholder="只会写入本机配置"></label>
             <label>余额查询 URL<input id="relay-balance-url" type="url" placeholder="可选，如 https://api.deepseek.com/user/balance"></label>
             <label>余额 JSON 路径<input id="relay-balance-path" placeholder="可选，如 balance_infos[0].total_balance"></label>
             <label>货币单位<input id="relay-balance-currency" placeholder="可选，如 CNY / USD"></label>
-            <label class="wide">模型映射<textarea id="relay-models" required rows="4" placeholder="qwen3-coder-plus=qwen-coder&#10;上游模型=客户端看到的名称"></textarea></label>
+            <label class="wide">模型映射<textarea id="relay-models" required rows="4" placeholder="上游模型=客户端看到的名称"></textarea></label>
           </div>
-          <div class="form-actions"><button type="submit" class="primary">保存中转</button><span class="hint">同名配置会被更新</span></div>
+          <div class="form-actions"><button type="submit" class="primary">保存中转</button><button type="button" id="cancel-relay-edit" class="ghost" hidden>取消编辑</button><span id="relay-edit-state" class="hint">同名配置会被更新</span></div>
         </form>
 
         <article class="card section-card">

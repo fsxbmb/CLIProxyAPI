@@ -9,6 +9,7 @@ const state = {
   models: [],
   quotas: {},
   balanceConfigs: (() => { try { return JSON.parse(localStorage.getItem("cliproxy-balance-configs") || "{}"); } catch { return {}; } })(),
+  editingRelay: null,
   quotaRefreshing: false,
   quotaTimer: null,
   connected: false,
@@ -139,7 +140,7 @@ async function loadAccounts() {
   if (state.connected) void loadQuotas({ silent: true });
 }
 
-const QUOTA_PROVIDERS = new Set(["codex", "antigravity", "gemini", "xai", "relay"]);
+const QUOTA_PROVIDERS = new Set(["codex", "claude", "anthropic", "antigravity", "gemini", "xai", "relay"]);
 
 function accountProvider(account) {
   return String(account.provider || account.type || "unknown").toLowerCase();
@@ -219,6 +220,27 @@ function parseCodexQuota(payload) {
   return { plan: payload?.plan_type || payload?.planType || "ChatGPT", rows };
 }
 
+function parseClaudeQuota(payload) {
+  const rows = [];
+  const windows = [
+    ["5 小时", payload?.five_hour ?? payload?.fiveHour],
+    ["每周", payload?.seven_day ?? payload?.sevenDay],
+    ["每周 · Opus", payload?.seven_day_opus ?? payload?.sevenDayOpus],
+    ["每周 · Sonnet", payload?.seven_day_sonnet ?? payload?.sevenDaySonnet],
+  ];
+  for (const [label, window] of windows) {
+    if (!window) continue;
+    const utilization = numberValue(window.utilization);
+    if (utilization === null) continue;
+    rows.push({ label, remaining: 100 - Math.max(0, Math.min(1, utilization)) * 100, reset: window.resets_at || window.resetsAt ? new Date(window.resets_at || window.resetsAt) : null });
+  }
+  const extra = payload?.extra_usage ?? payload?.extraUsage;
+  const extraUsed = numberValue(extra?.used_credits ?? extra?.usedCredits);
+  if (extra?.is_enabled && extraUsed !== null) rows.push({ label: "额外用量已用", value: String(extraUsed), reset: null });
+  if (!rows.length) throw new Error("Claude 官方接口未返回额度窗口");
+  return { plan: "Claude", rows, note: extra?.is_enabled ? "已启用额外用量。" : "额外用量未启用。" };
+}
+
 function parseGeminiQuota(payload) {
   const rows = [];
   for (const group of payload?.groups || []) {
@@ -240,25 +262,37 @@ function xaiCent(value) {
   return numberValue(value && typeof value === "object" ? value.val : value);
 }
 
-function parseXaiQuota(payload) {
+function parseXaiQuota(payload, legacyPayload = null) {
   const config = payload?.config;
-  if (!config) throw new Error("官方接口未返回 billing 配置");
-  const usage = numberValue(config.creditUsagePercent ?? config.credit_usage_percent);
-  const limit = xaiCent(config.monthlyLimit ?? config.monthly_limit);
-  const used = xaiCent(config.used);
-  const productUsage = config.productUsage ?? config.product_usage ?? [];
+  const legacyConfig = legacyPayload?.config;
+  if (!config && !legacyConfig) throw new Error("官方接口未返回 billing 配置");
+  const primary = config || legacyConfig;
+  const usage = numberValue(primary.creditUsagePercent ?? primary.credit_usage_percent);
+  const limit = xaiCent(primary.monthlyLimit ?? primary.monthly_limit ?? legacyConfig?.monthlyLimit ?? legacyConfig?.monthly_limit);
+  const used = xaiCent(primary.used ?? legacyConfig?.used);
+  const productUsage = primary.productUsage ?? primary.product_usage ?? legacyConfig?.productUsage ?? legacyConfig?.product_usage ?? [];
   const rows = [];
   if (usage !== null) rows.push({ label: "每周额度", remaining: 100 - usage, reset: null });
   for (const item of productUsage) {
     const percent = numberValue(item.usagePercent ?? item.usage_percent);
     if (percent !== null) rows.push({ label: item.product || "模型额度", remaining: 100 - percent, reset: null });
   }
-  if (limit !== null && limit > 0 && used !== null) rows.push({ label: "每月包含额度", remaining: 100 - (Math.min(used, limit) / limit * 100), reset: null });
-  const period = config.currentPeriod ?? config.current_period ?? {};
-  const resetRaw = period.end || config.billingPeriodEnd || config.billing_period_end;
+  if (limit !== null && limit > 0 && used !== null) {
+    rows.push({ label: "每月包含额度", remaining: 100 - (Math.min(used, limit) / limit * 100), reset: null });
+  } else {
+    rows.push({ label: "订阅模型", value: "grok-4.6 / grok-4.5", reset: null });
+    if (used !== null) rows.push({ label: "本月已用", value: `${used} credits`, reset: null });
+  }
+  const period = primary.currentPeriod ?? primary.current_period ?? {};
+  const resetRaw = period.end || primary.billingPeriodEnd || primary.billing_period_end || legacyConfig?.billingPeriodEnd || legacyConfig?.billing_period_end;
   const reset = resetRaw ? new Date(resetRaw) : null;
   rows.forEach((row) => { row.reset ||= reset; });
-  return { plan: "Grok", rows, note: rows.length ? "" : "账号可用；Grok 当前未向此 OAuth 凭据提供额度总量。", reset };
+  const unified = Boolean(primary.isUnifiedBillingUser ?? primary.is_unified_billing_user);
+  const plan = unified ? "SuperGrok · 订阅已激活" : "Grok";
+  const note = unified
+    ? "SuperGrok 订阅账户按周动态重置，官方接口不限制固定的百分比百分上限。"
+    : "";
+  return { plan, rows, note, reset };
 }
 
 function resolvePath(obj, path) {
@@ -352,6 +386,12 @@ async function fetchAccountQuota(account) {
     });
     return parseCodexQuota(result.body);
   }
+  if (provider === "claude" || provider === "anthropic") {
+    const result = await vendorCall(account, "GET", "https://api.anthropic.com/api/oauth/usage", {
+      Authorization: "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-cli/2.1.25 (external, cli)",
+    });
+    return parseClaudeQuota(result.body);
+  }
   if (provider === "antigravity" || provider === "gemini") {
     const project = account.project_id || account.projectId;
     if (!project) throw new Error("凭据缺少 project_id，请重新登录 Gemini");
@@ -378,9 +418,10 @@ async function fetchAccountQuota(account) {
       vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers),
       vendorCall(account, "GET", "https://cli-chat-proxy.grok.com/v1/billing", headers),
     ]);
-    const result = weekly.status === "fulfilled" ? weekly.value : monthly.status === "fulfilled" ? monthly.value : null;
-    if (!result) throw weekly.reason || monthly.reason || new Error("Grok 额度查询失败");
-    return parseXaiQuota(result.body);
+    const weeklyBody = weekly.status === "fulfilled" ? weekly.value.body : null;
+    const monthlyBody = monthly.status === "fulfilled" ? monthly.value.body : null;
+    if (!weeklyBody && !monthlyBody) throw weekly.reason || monthly.reason || new Error("Grok 额度查询失败");
+    return parseXaiQuota(weeklyBody || monthlyBody, monthlyBody && monthlyBody !== weeklyBody ? monthlyBody : null);
   }
   throw new Error("该供应商不支持额度预览");
 }
@@ -404,15 +445,21 @@ function appendQuotaContent(cell, account) {
   }
   const plan = document.createElement("span"); plan.className = "quota-status success"; plan.textContent = quota.data.plan || "已更新"; cell.append(plan);
   for (const row of quota.data.rows || []) {
-    if (row.balance !== undefined && row.balance !== null) {
+    const plainValue = row.balance ?? row.value;
+    if (plainValue !== undefined && plainValue !== null) {
+      const meter = document.createElement("div"); meter.className = "quota-meter";
       const line = document.createElement("div"); line.className = "quota-line";
       const label = document.createElement("span"); label.textContent = row.label;
-      const value = document.createElement("strong"); value.textContent = row.balance;
+      const value = document.createElement("strong"); value.textContent = plainValue;
+      const reset = document.createElement("small"); reset.textContent = formatReset(row.reset);
       line.append(label, value);
-      const track = document.createElement("div"); track.className = "quota-track";
-      const fill = document.createElement("span"); fill.style.width = "100%";
-      track.append(fill);
-      cell.append(line, track);
+      meter.append(line, reset);
+      if (row.balance !== undefined && row.balance !== null) {
+        const track = document.createElement("div"); track.className = "quota-track";
+        const fill = document.createElement("span"); fill.style.width = "100%";
+        track.append(fill); meter.insertBefore(track, reset);
+      }
+      cell.append(meter);
       continue;
     }
     const meter = document.createElement("div"); meter.className = "quota-meter";
@@ -611,8 +658,20 @@ async function pollOAuth(oauthState, provider) {
 }
 
 async function loadRelays() {
-  const data = await management("openai-compatibility");
-  state.relays = data["openai-compatibility"] || data.items || [];
+  const [compatData, codexData] = await Promise.all([
+    management("openai-compatibility"),
+    management("codex-api-key"),
+  ]);
+  const compat = compatData["openai-compatibility"] || compatData.items || [];
+  const codex = codexData["codex-api-key"] || codexData.items || [];
+  const codexRelays = codex.map((entry, index) => ({
+    ...entry,
+    name: entry.name || "CCH API",
+    "api-key-entries": entry["api-key-entries"] || (entry["api-key"] ? [{ "api-key": entry["api-key"] }] : []),
+    _source: "codex-api-key",
+    _sourceIndex: index,
+  }));
+  state.relays = [...compat, ...codexRelays];
   renderRelays();
   // 确保中转余额查询在中转列表就绪后再执行（页面加载时可能与 loadQuotas 竞争）
   if (state.connected) void loadQuotas({ silent: true });
@@ -638,14 +697,86 @@ function renderRelays() {
     const balance = balanceConfigFor(relay);
     detail.textContent = `${relay["base-url"] || "—"} · ${models} 个模型${relay.prefix ? ` · 前缀 ${relay.prefix}` : ""}${balance ? ` · 已配置余额查询` : ""}`;
     text.append(name, detail);
+    const actions = document.createElement("div");
+    actions.className = "relay-actions";
+    const view = document.createElement("button");
+    view.className = "ghost";
+    view.textContent = "查看配置";
+    view.addEventListener("click", () => {
+      const details = item.querySelector(".relay-config");
+      details.hidden = !details.hidden;
+    });
+    const edit = document.createElement("button");
+    edit.className = "ghost";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => editRelay(index));
     const remove = document.createElement("button");
     remove.className = "danger";
     remove.textContent = "删除";
     remove.addEventListener("click", () => deleteRelay(index));
-    item.append(text, remove);
+    actions.append(view, edit, remove);
+    const details = document.createElement("pre");
+    details.className = "relay-config output";
+    details.hidden = true;
+    const keyEntry = (relay["api-key-entries"] || [])[0];
+    const apiKey = keyEntry?.["api-key"] || relay["api-key"] || "";
+    const keyLine = document.createElement("div");
+    keyLine.className = "relay-key-view";
+    const keyInput = document.createElement("input");
+    keyInput.type = "password";
+    keyInput.value = apiKey;
+    keyInput.readOnly = true;
+    keyInput.setAttribute("aria-label", "API key");
+    const keyToggle = document.createElement("button");
+    keyToggle.className = "ghost";
+    keyToggle.textContent = "显示 API key";
+    keyToggle.addEventListener("click", () => {
+      keyInput.type = keyInput.type === "password" ? "text" : "password";
+      keyToggle.textContent = keyInput.type === "password" ? "显示 API key" : "隐藏 API key";
+    });
+    keyLine.append(keyInput, keyToggle);
+    const displayConfig = {
+      name: relay.name || "CCH API",
+      "base-url": relay["base-url"] || "",
+      prefix: relay.prefix || "",
+      models: relay.models || [],
+      source: relay._source === "codex-api-key" ? "codex-api-key" : "openai-compatibility",
+    };
+    details.textContent = JSON.stringify(displayConfig, null, 2);
+    details.before(keyLine);
+    item.append(text, actions, keyLine, details);
     list.append(item);
   });
   $("#relay-count").textContent = String(state.relays.length);
+}
+
+function editRelay(index) {
+  const relay = state.relays[index];
+  state.editingRelay = { relay, index };
+  $("#relay-name").value = relay.name || "CCH API";
+  $("#relay-prefix").value = relay.prefix || "";
+  $("#relay-url").value = relay["base-url"] || "";
+  const keyEntry = (relay["api-key-entries"] || [])[0];
+  const keyInput = $("#relay-key");
+  keyInput.value = keyEntry?.["api-key"] || relay["api-key"] || "";
+  $("#relay-models").value = (relay.models || []).map((model) => `${model.name || ""}=${model.alias || model.name || ""}`).join("\n");
+  const balance = state.balanceConfigs[relay.name];
+  $("#relay-balance-url").value = balance?.url || "";
+  $("#relay-balance-path").value = balance?.path || "";
+  $("#relay-balance-currency").value = balance?.currency || "";
+  $("#cancel-relay-edit").hidden = false;
+  $("#relay-edit-state").textContent = `编辑中：${relay.name || "中转"}，修改后点击保存中转`;
+  $("#relay-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  keyInput.focus();
+  keyInput.select();
+  notify(`正在编辑 ${relay.name || "中转"}，API key 已全选，可直接输入新值`);
+}
+
+function cancelRelayEdit() {
+  state.editingRelay = null;
+  $("#relay-form").reset();
+  $("#cancel-relay-edit").hidden = true;
+  $("#relay-edit-state").textContent = "同名配置会被更新";
 }
 
 function parseModels(raw) {
@@ -681,11 +812,26 @@ async function saveRelay(event) {
     delete state.balanceConfigs[name];
   }
   try { localStorage.setItem("cliproxy-balance-configs", JSON.stringify(state.balanceConfigs)); } catch { /* ignore */ }
-  const next = state.relays.filter((relay) => String(relay.name).toLowerCase() !== name.toLowerCase());
-  next.push(entry);
   try {
-    await management("openai-compatibility", { method: "PUT", body: next });
+    if (state.editingRelay?.relay?._source === "codex-api-key") {
+      const sourceIndex = state.editingRelay.relay._sourceIndex;
+      await management("codex-api-key", { method: "PATCH", body: {
+        index: sourceIndex,
+        value: {
+        "api-key": entry["api-key-entries"][0]["api-key"],
+        "base-url": entry["base-url"],
+        models: entry.models,
+        },
+      }});
+    } else {
+      const next = state.relays.filter((relay) => relay._source !== "codex-api-key" && String(relay.name).toLowerCase() !== name.toLowerCase());
+      next.push(entry);
+      await management("openai-compatibility", { method: "PUT", body: next });
+    }
     $("#relay-form").reset();
+    state.editingRelay = null;
+    $("#cancel-relay-edit").hidden = true;
+    $("#relay-edit-state").textContent = "同名配置会被更新";
     await loadRelays();
     await loadModels();
     if (balanceUrl) { loadQuotas({ silent: true }); }
@@ -698,22 +844,25 @@ async function deleteRelay(index) {
   if (!confirm(`删除中转 ${relay.name || index + 1}？`)) return;
   delete state.balanceConfigs[relay.name];
   try { localStorage.setItem("cliproxy-balance-configs", JSON.stringify(state.balanceConfigs)); } catch { /* ignore */ }
-  const next = state.relays.filter((_, itemIndex) => itemIndex !== index);
+  if (relay._source === "codex-api-key") {
+    const codexData = await management("codex-api-key");
+    const codex = codexData["codex-api-key"] || codexData.items || [];
+    const nextCodex = codex.filter((_, itemIndex) => itemIndex !== relay._sourceIndex);
+    try {
+      await management("codex-api-key", { method: "PUT", body: nextCodex });
+      await loadRelays();
+      await loadModels();
+      notify("中转已删除");
+    } catch (error) { notify(`删除失败：${error.message}`, true); }
+    return;
+  }
+  const next = state.relays.filter((item) => item._source === "codex-api-key" || item !== relay).filter((item) => item._source !== "codex-api-key");
   try {
     await management("openai-compatibility", { method: "PUT", body: next });
     await loadRelays();
     await loadModels();
     notify("中转已删除");
   } catch (error) { notify(`删除失败：${error.message}`, true); }
-}
-
-function fillQwenPreset() {
-  $("#relay-name").value = "Qwen";
-  $("#relay-prefix").value = "qwen";
-  $("#relay-url").value = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-  $("#relay-models").value = "qwen3-coder-plus=qwen-coder\nqwen-plus=qwen-plus";
-  $("#relay-key").focus();
-  notify("已填入 DashScope 兼容接口，请补充 API key 并核对模型名");
 }
 
 function vendorOf(modelId) {
@@ -736,6 +885,49 @@ function vendorOf(modelId) {
     if (pattern.test(probe)) return label;
   }
   return "其他模型";
+}
+
+function activateTab(tabId) {
+  $$(".tab").forEach((item) => item.classList.toggle("active", item.dataset.tab === tabId));
+  $$(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+}
+
+function renderProviderModels(provider) {
+  const list = $(`#${provider}-model-list`);
+  const count = $(`#${provider}-model-count`);
+  if (!list || !count) return;
+  const isMatch = provider === "grok"
+    ? (model, id) => String(model.owned_by || "").toLowerCase() === "xai" || /^grok/i.test(String(id))
+    : (model, id) => String(model.owned_by || "").toLowerCase() === "anthropic" || /^claude/i.test(String(id));
+  const models = state.models
+    .map((model) => ({ model, id: model.id || model.name || model }))
+    .filter(({ model, id }) => isMatch(model, id))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  count.textContent = models.length ? `${models.length} 个模型` : "暂无模型";
+  list.replaceChildren();
+  if (!models.length) {
+    const empty = document.createElement("p"); empty.className = "empty"; empty.textContent = `当前模型目录没有可用的 ${provider === "grok" ? "Grok" : "Claude"} 模型`; list.append(empty); return;
+  }
+  models.forEach(({ model, id }) => {
+    const button = document.createElement("button");
+    button.className = "model-chip";
+    button.type = "button";
+    button.textContent = model.display_name || id;
+    button.title = `测试 ${id}`;
+    button.addEventListener("click", () => {
+      const option = [...$("#test-model").options].find((item) => item.value === id);
+      if (option) $("#test-model").value = id;
+      activateTab("debug");
+      $("#test-model").focus();
+      notify(`已选择 ${id}，点击发送测试即可验证`);
+    });
+    list.append(button);
+  });
+}
+
+function renderProviderModelCatalogs() {
+  renderProviderModels("grok");
+  renderProviderModels("claude");
 }
 
 async function loadModels() {
@@ -766,6 +958,7 @@ async function loadModels() {
     select.append(group);
   });
   $("#model-count").textContent = String(state.models.length);
+  renderProviderModelCatalogs();
 }
 
 async function runModelTest() {
@@ -845,10 +1038,7 @@ async function copyText(text, label = "已复制") {
 }
 
 function bindEvents() {
-  $$(".tab").forEach((button) => button.addEventListener("click", () => {
-    $$(".tab").forEach((item) => item.classList.toggle("active", item === button));
-    $$(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.tab));
-  }));
+  $$(".tab").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
   $("#connect-button").addEventListener("click", connect);
   $("#management-key").addEventListener("keydown", (event) => { if (event.key === "Enter") connect(); });
   $("#reveal-key").addEventListener("click", () => { state.keyVisible = !state.keyVisible; renderKey(); });
@@ -859,8 +1049,8 @@ function bindEvents() {
   $("#refresh-quotas").addEventListener("click", () => loadQuotas().catch((error) => { $("#refresh-quotas").disabled = false; notify(error.message, true); }));
   $$(".provider-login").forEach((button) => button.addEventListener("click", () => startOAuth(button)));
   $("#relay-form").addEventListener("submit", saveRelay);
+  $("#cancel-relay-edit").addEventListener("click", cancelRelayEdit);
   $("#refresh-relays").addEventListener("click", () => loadRelays().catch((error) => notify(error.message, true)));
-  $("#qwen-preset").addEventListener("click", fillQwenPreset);
   $("#refresh-models").addEventListener("click", () => loadModels().then(() => notify("模型列表已刷新")).catch((error) => notify(error.message, true)));
   $("#run-test").addEventListener("click", runModelTest);
   $("#debug-toggle").addEventListener("change", setDebug);
