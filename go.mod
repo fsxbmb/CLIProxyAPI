@@ -4,6 +4,8 @@ go 1.26.0
 
 require github.com/router-for-me/CLIProxyAPI/v7 v7.2.139
 
+replace github.com/router-for-me/CLIProxyAPI/v7 => ./third_party/CLIProxyAPI
+
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
