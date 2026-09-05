@@ -2,16 +2,20 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -81,12 +85,58 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
+// assetTag is a short fingerprint of the embedded web assets. It is appended to
+// the script/stylesheet URLs in index.html so a rebuilt binary always busts any
+// copy the browser is holding on to, even though the file names never change.
+// versionedIndex serves index.html with ?v=<tag> appended to its local asset
+// references; every other file is served untouched.
+func versionedIndex(assets fs.FS, tag string) http.Handler {
+	fileServer := http.FileServer(http.FS(assets))
+	rewrite := strings.NewReplacer(
+		`href="styles.css"`, `href="styles.css?v=`+tag+`"`,
+		`src="app.js"`, `src="app.js?v=`+tag+`"`,
+	)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// StripPrefix leaves an empty path for the /ui/ root.
+		if r.URL.Path != "" && r.URL.Path != "/" && r.URL.Path != "/index.html" && r.URL.Path != "index.html" {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		page, err := fs.ReadFile(assets, "index.html")
+		if err != nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		body := rewrite.Replace(string(page))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = io.WriteString(w, body)
+	})
+}
+
+func assetTag(assets fs.FS) string {
+	sum := sha256.New()
+	_ = fs.WalkDir(assets, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, readErr := fs.ReadFile(assets, path)
+		if readErr != nil {
+			return readErr
+		}
+		_, _ = sum.Write([]byte(path))
+		_, _ = sum.Write(data)
+		return nil
+	})
+	return hex.EncodeToString(sum.Sum(nil))[:12]
+}
+
 func (s *Server) Handler() http.Handler {
 	assets, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		panic(err)
 	}
-	static := http.StripPrefix("/ui/", http.FileServer(http.FS(assets)))
+	static := http.StripPrefix("/ui/", versionedIndex(assets, assetTag(assets)))
 	managementProxy := s.reverseProxy("/api/", "/v0/management/")
 	apiProxy := s.reverseProxy("/proxy/", "/")
 
