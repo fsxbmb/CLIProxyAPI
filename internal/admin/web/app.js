@@ -1060,13 +1060,26 @@ async function runModelTest() {
     $("#test-output").textContent = `请求中… ${elapsed} 秒`;
   }, 1000);
   try {
-    const data = await proxyAPI("v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      body: { model, messages: [{ role: "user", content: prompt }], stream: false, max_tokens: 80 },
-    });
-    const content = data.choices?.[0]?.message?.content ?? data.output_text ?? data;
-    $("#test-output").textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+    const isImageModel = /^gpt-image/i.test(model) || /^grok-imagine-image/i.test(model);
+    let data;
+    if (isImageModel) {
+      data = await proxyAPI("v1/images/generations", {
+        method: "POST",
+        signal: controller.signal,
+        body: { model, prompt: prompt || "a simple test image" },
+      });
+      const imgItem = data.data?.[0];
+      const resultText = imgItem?.url || (imgItem?.b64_json ? `[图像生成成功，返回 Base64 长度 ${imgItem.b64_json.length}]` : JSON.stringify(data, null, 2));
+      $("#test-output").textContent = `[图像生成成功]\n${resultText}`;
+    } else {
+      data = await proxyAPI("v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        body: { model, messages: [{ role: "user", content: prompt }], stream: false, max_tokens: 80 },
+      });
+      const content = data.choices?.[0]?.message?.content ?? data.output_text ?? data;
+      $("#test-output").textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+    }
     notify("模型请求成功");
   } catch (error) {
     const message = error.name === "AbortError" ? "请求超过 120 秒，已取消" : error.message;
