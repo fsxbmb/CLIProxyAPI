@@ -235,6 +235,12 @@ func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entr
 		metadata := map[string]any{}
 		if entry.DisableCooling != nil {
 			metadata["disable_cooling"] = *entry.DisableCooling
+		} else if provider == "codex" {
+			// Codex API keys (CCH relays) are often a single credential.
+			// Transient upstream 502/overload should retry immediately instead
+			// of cooling the only key. YAML may still set disable-cooling: false.
+			// OAuth Plus files are synthesized separately and keep cooldowns.
+			metadata["disable_cooling"] = true
 		}
 		addRequestRetryToMetadata(entry.RequestRetry, metadata)
 		addRequestScopedErrorsToMetadata(entry.RequestScopedErrors, metadata)

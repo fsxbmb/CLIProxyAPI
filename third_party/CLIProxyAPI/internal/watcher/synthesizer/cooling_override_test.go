@@ -93,3 +93,42 @@ func TestConfigSynthesizerPreservesExplicitFalseCoolingOverrides(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigSynthesizerDefaultsCodexAPIKeyCoolingOff(t *testing.T) {
+	auths, errSynthesize := NewConfigSynthesizer().Synthesize(&SynthesisContext{
+		Config: &config.Config{CodexKey: []config.CodexKey{{
+			APIKey:  "codex-key",
+			BaseURL: "http://127.0.0.1:23000/v1",
+		}}},
+		Now:         time.Unix(100, 0).UTC(),
+		IDGenerator: NewStableIDGenerator(),
+	})
+	if errSynthesize != nil {
+		t.Fatalf("Synthesize() error = %v", errSynthesize)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("auth count = %d, want 1", len(auths))
+	}
+	disabled, present := auths[0].DisableCoolingOverride()
+	if !present || !disabled {
+		t.Fatalf("DisableCoolingOverride() = %t, %t, want true, true", disabled, present)
+	}
+
+	xaiAuths, errXAI := NewConfigSynthesizer().Synthesize(&SynthesisContext{
+		Config: &config.Config{XAIKey: []config.XAIKey{{
+			APIKey:  "xai-key",
+			BaseURL: "https://api.x.ai/v1",
+		}}},
+		Now:         time.Unix(100, 0).UTC(),
+		IDGenerator: NewStableIDGenerator(),
+	})
+	if errXAI != nil {
+		t.Fatalf("Synthesize() error = %v", errXAI)
+	}
+	if len(xaiAuths) != 1 {
+		t.Fatalf("xai auth count = %d, want 1", len(xaiAuths))
+	}
+	if _, present := xaiAuths[0].DisableCoolingOverride(); present {
+		t.Fatalf("xai DisableCoolingOverride present = true, want omitted")
+	}
+}
