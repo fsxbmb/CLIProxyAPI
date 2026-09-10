@@ -56,7 +56,7 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 }
 
 func TestImagesModelValidationAllowsGPTImageAndXAIModels(t *testing.T) {
-	for _, model := range []string{"gpt-image-1.5", "codex/gpt-image-1.5", "gpt-image-2", "codex/gpt-image-2", "grok-imagine-image", "xai/grok-imagine-image", "grok-imagine-image-quality", "xai/grok-imagine-image-quality", "grok-imagine-image-2.0", "xai/grok-imagine-image-2.0"} {
+	for _, model := range []string{"gpt-image-1.5", "codex/gpt-image-1.5", "gpt-image-2", "codex/gpt-image-2", "cch-gpt-image-2", "grok-imagine-image", "xai/grok-imagine-image", "grok-imagine-image-quality", "xai/grok-imagine-image-quality", "grok-imagine-image-2.0", "xai/grok-imagine-image-2.0"} {
 		if !isSupportedImagesModel(model) {
 			t.Fatalf("expected %s to be supported", model)
 		}

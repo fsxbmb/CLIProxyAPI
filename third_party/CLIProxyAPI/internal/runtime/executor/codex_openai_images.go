@@ -855,6 +855,9 @@ func codexOpenAIImageToolModel(requestModel string, routeModel string) string {
 	if model == "" {
 		model = codexDefaultImageToolModel
 	}
+	if strings.EqualFold(model, "cch-gpt-image-2") {
+		return codexDefaultImageToolModel
+	}
 	return model
 }
 

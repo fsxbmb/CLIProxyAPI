@@ -29,6 +29,7 @@ const (
 	defaultImagesMainModel      = "gpt-5.4-mini"
 	gptImage15Model             = "gpt-image-1.5"
 	defaultImagesToolModel      = "gpt-image-2"
+	cchImagesToolModel          = "cch-gpt-image-2"
 	defaultXAIImagesModel       = "grok-imagine-image"
 	xaiImagesQualityModel       = "grok-imagine-image-quality"
 	xaiImages20Model            = "grok-imagine-image-2.0"
@@ -239,7 +240,7 @@ func isSupportedImagesModel(model string) bool {
 
 func isCodexImagesToolModel(model string) bool {
 	baseModel := imagesModelBase(model)
-	return baseModel == gptImage15Model || baseModel == defaultImagesToolModel
+	return baseModel == gptImage15Model || baseModel == defaultImagesToolModel || baseModel == cchImagesToolModel
 }
 
 func isOpenAICompatImagesModel(model string) bool {
