@@ -8,6 +8,7 @@ const state = {
   relays: [],
   models: [],
   quotas: {},
+  plans: (() => { try { return JSON.parse(localStorage.getItem("cliproxy-account-plans") || "{}"); } catch { return {}; } })(),
   balanceConfigs: (() => { try { return JSON.parse(localStorage.getItem("cliproxy-balance-configs") || "{}"); } catch { return {}; } })(),
   editingRelay: null,
   quotaRefreshing: false,
@@ -239,7 +240,9 @@ function parseCodexQuota(payload) {
     }
   }
   if (!rows.length) throw new Error("官方接口未返回额度窗口");
-  return { plan: payload?.plan_type || payload?.planType || "ChatGPT", rows };
+  const planType = String(payload?.plan_type || payload?.planType || payload?.account_plan || payload?.plan || payload?.subscription_type || "").toLowerCase();
+  const plan = planType ? (planType.includes("free") ? "ChatGPT Free" : planType.includes("plus") ? "ChatGPT Plus" : planType.includes("team") ? "ChatGPT Team" : planType.includes("pro") ? "ChatGPT Pro" : `ChatGPT ${planType}`) : "ChatGPT";
+  return { plan, rows };
 }
 
 function parseClaudeQuota(payload) {
@@ -331,7 +334,7 @@ function parseXaiQuota(payload, legacyPayload = null) {
   const reset = resetRaw ? new Date(resetRaw) : null;
   rows.forEach((row) => { row.reset ||= reset; });
   const unified = Boolean(primary.isUnifiedBillingUser ?? primary.is_unified_billing_user);
-  const plan = unified ? "SuperGrok · 统一计费" : "Grok";
+  const plan = unified ? "SuperGrok · 统一计费" : "Grok Free";
   const hasPercent = rows.some((row) => row.remaining !== undefined && row.remaining !== null);
   const note = hasPercent ? "" : "官方接口未返回额度上限，当前只能显示已用 credits，无法计算剩余百分比。";
   return { plan, rows, note, reset };
@@ -544,15 +547,21 @@ async function loadQuotas({ silent = false } = {}) {
   if (!targets.length) { if (!silent) notify("没有可查询的账号或中转", true); return; }
   state.quotaRefreshing = true;
   button.disabled = true;
-  targets.forEach((account) => state.quotas[accountKey(account)] = { status: "loading" });
+  targets.forEach((account) => {
+    const key = accountKey(account);
+    const prev = state.quotas[key];
+    state.quotas[key] = { ...prev, status: "loading" };
+  });
   renderQuotas();
   try {
     const results = await Promise.allSettled(targets.map(async (account) => {
+      const key = accountKey(account);
+      const prev = state.quotas[key];
       try {
         const data = await fetchAccountQuota(account);
-        state.quotas[accountKey(account)] = { status: "success", data };
+        state.quotas[key] = { ...prev, status: "success", data };
       } catch (error) {
-        state.quotas[accountKey(account)] = { status: "error", error: error.message || "额度查询失败" };
+        state.quotas[key] = { ...prev, status: "error", error: error.message || "额度查询失败" };
       }
       renderQuotas();
       // plan 信息来自额度接口，到货后重算 Plus/Free 拆分。
@@ -638,20 +647,58 @@ function renderAccounts() {
   renderOverviewCounts();
 }
 
-// 把各厠商的内部标识映射成界面叫法。
-// Codex 同时包含 Plus/Free，只能靠额度接口返回的 plan 区分；额度未到货时统一计为 GPT。
+// 把各厂商的内部标识映射成界面叫法。
+// 准确区分会员账号（Plus / Pro / SuperGrok 等）与免费/非会员账号（Free）。
 function accountKindLabel(account) {
   const kind = String(account.provider || account.type || "").toLowerCase();
-  if (kind === "codex") {
-    const plan = String(state.quotas[accountKey(account)]?.data?.plan || "").toLowerCase();
-    const tier = ["free", "plus", "pro", "team"].find((name) => plan.includes(name));
-    return tier ? `GPT ${tier[0].toUpperCase()}${tier.slice(1)}` : "GPT";
+  const key = accountKey(account);
+  const quotaPlan = state.quotas[key]?.data?.plan;
+  if (quotaPlan) {
+    state.plans[key] = quotaPlan;
+    try { localStorage.setItem("cliproxy-account-plans", JSON.stringify(state.plans)); } catch {}
   }
-  return { claude: "Claude Pro", antigravity: "Gemini Pro", gemini: "Gemini Pro", xai: "Grok", grok: "Grok" }[kind]
-    || (kind ? kind.toUpperCase() : "其他");
+  const rawPlan = String(quotaPlan || state.plans[key] || account.plan || account.plan_type || account.label || account.name || "").toLowerCase();
+
+  // 1. Grok / XAI 账号
+  if (kind === "xai" || kind === "grok") {
+    if (rawPlan.includes("super") || rawPlan.includes("pro") || rawPlan.includes("premium") || rawPlan.includes("paid") || rawPlan.includes("unified") || rawPlan.includes("统一计费")) {
+      return "SuperGrok";
+    }
+    return "Grok Free";
+  }
+
+  // 2. Codex / ChatGPT 账号
+  if (kind === "codex") {
+    if (rawPlan.includes("free") || rawPlan.includes("免费") || /free|免费/i.test(accountIdentity(account)) || /free|免费/i.test(accountKey(account))) {
+      return "GPT Free";
+    }
+    if (rawPlan.includes("plus")) return "GPT Plus";
+    if (rawPlan.includes("pro")) return "GPT Pro";
+    if (rawPlan.includes("team")) return "GPT Team";
+    const tier = ["plus", "pro", "team"].find((name) => rawPlan.includes(name));
+    if (tier) {
+      return `GPT ${tier[0].toUpperCase()}${tier.slice(1)}`;
+    }
+    // 额度接口未查到 plus/pro/team 等明确付费标识时，按普通免费账号处理，不再默认算作 GPT Plus
+    return "GPT Free";
+  }
+
+  // 3. Claude / Anthropic 账号
+  if (kind === "claude" || kind === "anthropic") {
+    if (rawPlan.includes("free") || rawPlan.includes("免费")) return "Claude Free";
+    return "Claude Pro";
+  }
+
+  // 4. Gemini / Antigravity 账号
+  if (kind === "gemini" || kind === "antigravity") {
+    if (rawPlan.includes("free") || rawPlan.includes("免费")) return "Gemini Free";
+    return "Gemini Pro";
+  }
+
+  return rawPlan.includes("free") ? `${kind.toUpperCase()} Free` : (kind ? kind.toUpperCase() : "其他");
 }
 
-// 按实际配置统计各类 AI 工具数量，而不是写死的目标值。
+// 按实际配置统计各类 AI 工具数量，包含 AI账号总数、会员账号、免费/非会员账号、中转/API 独立卡片。
 function renderOverviewCounts() {
   const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
   const tally = (items, labeller) => {
@@ -662,18 +709,30 @@ function renderOverviewCounts() {
   };
   const oauth = state.accounts.length;
   const relay = state.relays.length;
-  // 免费套餐不计入会员数；额度未到货时无法判断，此时暂归为会员。
-  const members = state.accounts.filter((item) => !accountKindLabel(item).endsWith(" Free"));
-  const free = oauth - members.length;
 
+  const members = state.accounts.filter((item) => !accountKindLabel(item).endsWith(" Free"));
+  const freeItems = state.accounts.filter((item) => accountKindLabel(item).endsWith(" Free"));
+
+  // 1. AI 账号总数
   setText("#account-count", String(oauth + relay));
   setText("#account-count-note", `${oauth} 个 OAuth · ${relay} 个 中转/API`);
+
+  // 2. 会员账号卡片
   setText("#codex-count", String(members.length));
   setText("#codex-count-note", members.length
-    ? tally(members, accountKindLabel) + (free ? ` · 另 ${free} 个免费` : "")
-    : "尚未连接会员账号");
+    ? tally(members, accountKindLabel)
+    : "暂无会员账号");
+
+  // 3. 免费 / 非会员账号卡片
+  setText("#free-count", String(freeItems.length));
+  setText("#free-count-note", freeItems.length
+    ? tally(freeItems, accountKindLabel)
+    : "暂无免费账号");
+
+  // 4. 中转 / API 卡片
+  setText("#relay-count", String(relay));
   setText("#relay-count-note", relay
-    ? tally(state.relays, (item) => (item._source === "codex-api-key" ? "中转站" : item.name || "API"))
+    ? tally(state.relays, (item) => item.name || item.prefix || (item._source === "codex-api-key" ? "中转站" : "API"))
     : "尚未配置中转");
 }
 
