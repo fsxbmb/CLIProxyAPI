@@ -34,7 +34,7 @@ const (
 	codexDirectImagesGenerations = "/images/generations"
 	codexDirectImagesEdit        = "/images/edits"
 	codexGPTImage15Model         = "gpt-image-1.5"
-	codexOpenAIImagesMainModel   = "gpt-5.4-mini"
+	codexOpenAIImagesMainModel   = "gpt-5.6-sol"
 )
 
 type codexOpenAIImagePreparedRequest struct {
@@ -857,6 +857,9 @@ func codexOpenAIImageToolModel(requestModel string, routeModel string) string {
 	}
 	if strings.EqualFold(model, "cch-gpt-image-2") {
 		return codexDefaultImageToolModel
+	}
+	if strings.EqualFold(model, "cch-gpt-image-2.5") {
+		return "gpt-image-2.5"
 	}
 	return model
 }

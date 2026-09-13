@@ -108,6 +108,10 @@ func versionedIndex(assets fs.FS, tag string) http.Handler {
 			return
 		}
 		body := rewrite.Replace(string(page))
+		// The UI is embedded in the binary. Do not let browsers reuse an old
+		// entry document after an upgrade; the rewritten asset URLs below carry
+		// content fingerprints and can still be cached independently.
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		_, _ = io.WriteString(w, body)

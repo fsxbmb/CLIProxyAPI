@@ -105,29 +105,20 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
           </table>
         </div>
       </article>
-
-      <div class="grid two model-catalog-grid">
-        <article class="card section-card">
-          <div class="section-title">
-            <div><p class="eyebrow">GROK MODEL CATALOG</p><h2>当前可用的 Grok 模型</h2><p class="muted">来自实时 `/v1/models`；点击模型可直接进入调试页测试。</p></div>
-            <span id="grok-model-count" class="quota-status">等待加载</span>
-          </div>
-          <div id="grok-model-list" class="model-chip-list"><p class="empty">连接管理接口后加载</p></div>
-        </article>
-
-        <article class="card section-card">
-          <div class="section-title">
-            <div><p class="eyebrow">CLAUDE MODEL CATALOG</p><h2>当前可用的 Claude 模型</h2><p class="muted">来自实时 `/v1/models`；点击模型可直接进入调试页测试。</p></div>
-            <span id="claude-model-count" class="quota-status">等待加载</span>
-          </div>
-          <div id="claude-model-list" class="model-chip-list"><p class="empty">连接管理接口后加载</p></div>
-        </article>
-      </div>
     </section>
 
     <section id="relays" class="panel">
       <div class="section-heading">
-        <div><p class="eyebrow">OPENAI-COMPATIBLE</p><h2>第三方中转</h2><p class="muted">管理 OpenAI-compatible API 中转，以及已配置的 Codex API 中转。</p></div>
+        <div><p class="eyebrow">OPENAI-COMPATIBLE</p><h2>第三方中转</h2><p class="muted">管理 OpenAI-compatible API 中转，并可配置多 Key 轮换调度规则。</p></div>
+        <div class="routing-strategy-wrap">
+          <label style="margin-top:0">多 Key 轮换调度规则
+            <select id="routing-strategy">
+              <option value="round-robin">轮询模式 (Round Robin - 多个 Key 循环使用)</option>
+              <option value="fill-first">顺序优先 (Fill First - 优先填满前一个 Key，耗尽/报错再切下一个)</option>
+              <option value="weighted-round-robin">按权重轮询 (Weighted Round Robin)</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       <div class="grid relay-grid">
@@ -136,7 +127,7 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
             <label>显示名称<input id="relay-name" required placeholder="例如 CCH API / My Relay"></label>
             <label>模型前缀<input id="relay-prefix" placeholder="例如 qwen（可选）"></label>
             <label class="wide">Base URL<input id="relay-url" type="url" required placeholder="https://…/v1"></label>
-            <label class="wide">上游 API key<input id="relay-key" type="text" required autocomplete="off" spellcheck="false" placeholder="只会写入本机配置"></label>
+            <label class="wide">上游 API key（支持添加多个，每行一个）<textarea id="relay-key" required rows="3" autocomplete="off" spellcheck="false" placeholder="每行一个 API key，例如：&#10;sk-cch-key-1&#10;sk-cch-key-2&#10;也可指定权重：sk-cch-key-1,weight=5"></textarea></label>
             <label>余额查询 URL<input id="relay-balance-url" type="url" placeholder="可选，如 https://api.deepseek.com/user/balance"></label>
             <label>余额 JSON 路径<input id="relay-balance-path" placeholder="可选，如 balance_infos[0].total_balance"></label>
             <label>货币单位<input id="relay-balance-currency" placeholder="可选，如 CNY / USD"></label>

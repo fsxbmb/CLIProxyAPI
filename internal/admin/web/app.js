@@ -800,20 +800,101 @@ async function pollOAuth(oauthState, provider) {
   $("#oauth-progress").textContent = `${provider} 登录已超时`;
 }
 
+function maskKey(key) {
+  if (!key || key.length <= 8) return "••••••••";
+  return key.slice(0, 7) + "••••" + key.slice(-4);
+}
+
+function parseAPIKeys(raw) {
+  const lines = raw.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const entries = [];
+  for (const line of lines) {
+    if (line.includes(",") && !line.toLowerCase().includes("weight")) {
+      const parts = line.split(",").map((p) => p.trim()).filter(Boolean);
+      parts.forEach((p) => entries.push({ "api-key": p }));
+      continue;
+    }
+    const weightMatch = line.match(/^(.*?)[,:\s]+weight[=\s:]+(\d+)$/i) || line.match(/^(.*?)[,\s]+(\d+)$/);
+    if (weightMatch) {
+      const key = weightMatch[1].trim();
+      const weight = parseInt(weightMatch[2], 10);
+      if (key && !isNaN(weight)) {
+        entries.push({ "api-key": key, weight });
+        continue;
+      }
+    }
+    entries.push({ "api-key": line });
+  }
+  return entries;
+}
+
+function formatAPIKeys(relay) {
+  const entries = relay["api-key-entries"] || (relay["api-key"] ? [{ "api-key": relay["api-key"] }] : []);
+  if (entries.length) {
+    return entries.map((entry) => {
+      const key = entry["api-key"] || "";
+      const weight = entry.weight;
+      return weight && weight !== 1 ? `${key},weight=${weight}` : key;
+    }).filter(Boolean).join("\n");
+  }
+  return "";
+}
+
+async function loadRoutingStrategy() {
+  try {
+    const res = await management("routing/strategy");
+    if (res && res.strategy) {
+      const select = $("#routing-strategy");
+      if (select) select.value = res.strategy;
+    }
+  } catch { /* ignore non-fatal load errors */ }
+}
+
+async function setRoutingStrategy(strategy) {
+  if (!state.connected) return notify("请先连接管理接口", true);
+  try {
+    await management("routing/strategy", { method: "PUT", body: { value: strategy } });
+    const labelMap = {
+      "round-robin": "轮询模式 (Round Robin)",
+      "fill-first": "顺序优先模式 (Fill First)",
+      "weighted-round-robin": "按权重轮询 (Weighted Round Robin)",
+    };
+    notify(`路由调度规则已更新为：${labelMap[strategy] || strategy}`);
+  } catch (error) {
+    notify(`切换调度规则失败：${error.message}`, true);
+  }
+}
+
 async function loadRelays() {
   const [compatData, codexData] = await Promise.all([
     management("openai-compatibility"),
     management("codex-api-key"),
+    loadRoutingStrategy(),
   ]);
   const compat = compatData["openai-compatibility"] || compatData.items || [];
-  const codex = codexData["codex-api-key"] || codexData.items || [];
-  const codexRelays = codex.map((entry, index) => ({
-    ...entry,
-    name: entry.name || "CCH API",
-    "api-key-entries": entry["api-key-entries"] || (entry["api-key"] ? [{ "api-key": entry["api-key"] }] : []),
-    _source: "codex-api-key",
-    _sourceIndex: index,
-  }));
+  const rawCodex = codexData["codex-api-key"] || codexData.items || [];
+  
+  // 聚合相同的 Codex/CCH 中转组
+  const codexGroups = {};
+  rawCodex.forEach((entry, index) => {
+    const keyName = entry.name || "CCH API";
+    const groupKey = `${keyName}|${entry["base-url"] || ""}`;
+    if (!codexGroups[groupKey]) {
+      codexGroups[groupKey] = {
+        ...entry,
+        name: keyName,
+        "api-key-entries": [],
+        _source: "codex-api-key",
+        _indices: []
+      };
+    }
+    if (entry["api-key"]) {
+      codexGroups[groupKey]["api-key-entries"].push({ "api-key": entry["api-key"] });
+    }
+    codexGroups[groupKey]._indices.push(index);
+  });
+
+  const codexRelays = Object.values(codexGroups);
   state.relays = [...compat, ...codexRelays];
   renderRelays();
   // 确保中转余额查询在中转列表就绪后再执行（页面加载时可能与 loadQuotas 竞争）
@@ -837,8 +918,10 @@ function renderRelays() {
     name.textContent = relay.name || `中转 ${index + 1}`;
     const detail = document.createElement("small");
     const models = Array.isArray(relay.models) ? relay.models.length : 0;
+    const keyEntries = relay["api-key-entries"] || (relay["api-key"] ? [{ "api-key": relay["api-key"] }] : []);
+    const keyCount = keyEntries.length;
     const balance = balanceConfigFor(relay);
-    detail.textContent = `${relay["base-url"] || "—"} · ${models} 个模型${relay.prefix ? ` · 前缀 ${relay.prefix}` : ""}${balance ? ` · 已配置余额查询` : ""}`;
+    detail.textContent = `${relay["base-url"] || "—"} · ${keyCount} 个 API key · ${models} 个模型${relay.prefix ? ` · 前缀 ${relay.prefix}` : ""}${balance ? ` · 已配置余额查询` : ""}`;
     text.append(name, detail);
     const actions = document.createElement("div");
     actions.className = "relay-actions";
@@ -861,27 +944,34 @@ function renderRelays() {
     const details = document.createElement("pre");
     details.className = "relay-config output";
     details.hidden = true;
-    const keyEntry = (relay["api-key-entries"] || [])[0];
-    const apiKey = keyEntry?.["api-key"] || relay["api-key"] || "";
+
     const keyLine = document.createElement("div");
     keyLine.className = "relay-key-view";
-    const keyInput = document.createElement("input");
-    keyInput.type = "password";
-    keyInput.value = apiKey;
+    const keyInput = document.createElement("textarea");
+    keyInput.rows = Math.min(Math.max(keyEntries.length, 1), 6);
     keyInput.readOnly = true;
-    keyInput.setAttribute("aria-label", "API key");
+    keyInput.setAttribute("aria-label", "API key 列表");
+
+    const maskedText = keyEntries.map((k, i) => `Key ${i + 1}: ${maskKey(k["api-key"] || "")}${k.weight ? ` (weight: ${k.weight})` : ""}`).join("\n");
+    const rawText = keyEntries.map((k, i) => `Key ${i + 1}: ${k["api-key"] || ""}${k.weight ? ` (weight: ${k.weight})` : ""}`).join("\n");
+    keyInput.value = maskedText;
+
     const keyToggle = document.createElement("button");
     keyToggle.className = "ghost";
     keyToggle.textContent = "显示 API key";
+    let keysShown = false;
     keyToggle.addEventListener("click", () => {
-      keyInput.type = keyInput.type === "password" ? "text" : "password";
-      keyToggle.textContent = keyInput.type === "password" ? "显示 API key" : "隐藏 API key";
+      keysShown = !keysShown;
+      keyInput.value = keysShown ? rawText : maskedText;
+      keyToggle.textContent = keysShown ? "隐藏 API key" : "显示 API key";
     });
     keyLine.append(keyInput, keyToggle);
+
     const displayConfig = {
       name: relay.name || "CCH API",
       "base-url": relay["base-url"] || "",
       prefix: relay.prefix || "",
+      "api-key-entries": keyEntries,
       models: relay.models || [],
       source: relay._source === "codex-api-key" ? "codex-api-key" : "openai-compatibility",
     };
@@ -900,9 +990,8 @@ function editRelay(index) {
   $("#relay-name").value = relay.name || "CCH API";
   $("#relay-prefix").value = relay.prefix || "";
   $("#relay-url").value = relay["base-url"] || "";
-  const keyEntry = (relay["api-key-entries"] || [])[0];
   const keyInput = $("#relay-key");
-  keyInput.value = keyEntry?.["api-key"] || relay["api-key"] || "";
+  keyInput.value = formatAPIKeys(relay);
   $("#relay-models").value = (relay.models || []).map((model) => `${model.name || ""}=${model.alias || model.name || ""}`).join("\n");
   const balance = state.balanceConfigs[relay.name];
   $("#relay-balance-url").value = balance?.url || "";
@@ -912,8 +1001,7 @@ function editRelay(index) {
   $("#relay-edit-state").textContent = `编辑中：${relay.name || "中转"}，修改后点击保存中转`;
   $("#relay-form").scrollIntoView({ behavior: "smooth", block: "start" });
   keyInput.focus();
-  keyInput.select();
-  notify(`正在编辑 ${relay.name || "中转"}，API key 已全选，可直接输入新值`);
+  notify(`正在编辑 ${relay.name || "中转"}，API key 已填入`);
 }
 
 function cancelRelayEdit() {
@@ -934,15 +1022,16 @@ async function saveRelay(event) {
   event.preventDefault();
   if (!state.connected) return notify("请先连接管理接口", true);
   const name = $("#relay-name").value.trim();
+  const keyEntries = parseAPIKeys($("#relay-key").value);
   const entry = {
     name,
     prefix: $("#relay-prefix").value.trim(),
     "base-url": $("#relay-url").value.trim().replace(/\/$/, ""),
-    "api-key-entries": [{ "api-key": $("#relay-key").value.trim() }],
+    "api-key-entries": keyEntries,
     models: parseModels($("#relay-models").value),
   };
-  if (!name || !entry["base-url"] || !entry["api-key-entries"][0]["api-key"] || !entry.models.length) {
-    return notify("请完整填写名称、URL、API key 和模型", true);
+  if (!name || !entry["base-url"] || !keyEntries.length || !entry.models.length) {
+    return notify("请完整填写名称、URL、至少一个 API key 和模型", true);
   }
   // 余额查询配置（非敏感，存浏览器本地）
   const balanceUrl = $("#relay-balance-url").value.trim();
@@ -959,14 +1048,24 @@ async function saveRelay(event) {
   try {
     if (state.editingRelay?.relay?._source === "codex-api-key") {
       const sourceIndex = state.editingRelay.relay._sourceIndex;
-      await management("codex-api-key", { method: "PATCH", body: {
-        index: sourceIndex,
-        value: {
-        "api-key": entry["api-key-entries"][0]["api-key"],
-        "base-url": entry["base-url"],
-        models: entry.models,
-        },
-      }});
+      if (keyEntries.length === 1) {
+        await management("codex-api-key", { method: "PATCH", body: {
+          index: sourceIndex,
+          value: {
+            "api-key": keyEntries[0]["api-key"],
+            "base-url": entry["base-url"],
+            models: entry.models,
+          },
+        }});
+      } else {
+        const codexData = await management("codex-api-key");
+        const codex = codexData["codex-api-key"] || codexData.items || [];
+        const nextCodex = codex.filter((_, idx) => idx !== sourceIndex);
+        await management("codex-api-key", { method: "PUT", body: nextCodex });
+        const nextCompat = state.relays.filter((r) => r._source !== "codex-api-key" && String(r.name).toLowerCase() !== name.toLowerCase());
+        nextCompat.push(entry);
+        await management("openai-compatibility", { method: "PUT", body: nextCompat });
+      }
     } else {
       const next = state.relays.filter((relay) => relay._source !== "codex-api-key" && String(relay.name).toLowerCase() !== name.toLowerCase());
       next.push(entry);
@@ -1207,6 +1306,7 @@ function bindEvents() {
   $$(".provider-login").forEach((button) => button.addEventListener("click", () => startOAuth(button)));
   $("#relay-form").addEventListener("submit", saveRelay);
   $("#cancel-relay-edit").addEventListener("click", cancelRelayEdit);
+  $("#routing-strategy").addEventListener("change", (e) => setRoutingStrategy(e.target.value));
   $("#refresh-relays").addEventListener("click", () => loadRelays().catch((error) => notify(error.message, true)));
   $("#refresh-models").addEventListener("click", () => loadModels().then(() => notify("模型列表已刷新")).catch((error) => notify(error.message, true)));
   $("#run-test").addEventListener("click", runModelTest);

@@ -38,6 +38,19 @@ func codexOpenAIImageTestOptions(path string, stream bool) cliproxyexecutor.Opti
 	}
 }
 
+func TestCodexOpenAIImageToolModelNormalizesCCHAliases(t *testing.T) {
+	tests := map[string]string{
+		"cch-gpt-image-2":   "gpt-image-2",
+		"cch-gpt-image-2.5": "gpt-image-2.5",
+		"gpt-image-2.5":     "gpt-image-2.5",
+	}
+	for input, want := range tests {
+		if got := codexOpenAIImageToolModel(input, ""); got != want {
+			t.Errorf("codexOpenAIImageToolModel(%q, \"\") = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestCodexExecutorDirectOpenAIImageGenerationUsesImagesEndpoint(t *testing.T) {
 	var gotPath string
 	var gotAuth string
