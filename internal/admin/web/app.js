@@ -768,7 +768,10 @@ async function startOAuth(button) {
     const deviceNote = data.user_code ? ` 设备码：${data.user_code}` : "";
     $("#oauth-progress").textContent = `${provider} 登录进行中…${deviceNote}`;
     notify(`${provider} 登录窗口已打开${deviceNote}`);
-    if (data.state) pollOAuth(data.state, provider);
+    if (data.state) {
+      const knownAccounts = new Set(state.accounts.map(accountKey));
+      void pollOAuth(data.state, provider, knownAccounts);
+    }
   } catch (error) {
     notify(`${provider} 登录启动失败：${error.message}`, true);
   } finally {
@@ -776,7 +779,32 @@ async function startOAuth(button) {
   }
 }
 
-async function pollOAuth(oauthState, provider) {
+function oauthProviderMatches(account, provider) {
+  const actual = accountProvider(account);
+  const expected = String(provider || "").toLowerCase();
+  if (expected === "gemini") return actual === "gemini" || actual === "antigravity";
+  if (expected === "chatgpt plus") return actual === "codex";
+  if (expected === "grok") return actual === "xai" || actual === "grok";
+  if (expected === "claude") return actual === "claude" || actual === "anthropic";
+  return actual === expected;
+}
+
+async function syncOAuthAccount(provider, knownAccounts) {
+  // Some providers mark the OAuth session completed a few seconds before the
+  // credential file is written. Retry the account list so the successful login
+  // cannot leave the UI showing the old snapshot.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await loadAccounts();
+    const appeared = state.accounts.some((account) =>
+      !knownAccounts.has(accountKey(account)) && oauthProviderMatches(account, provider));
+    if (appeared) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  await loadAccounts();
+  return false;
+}
+
+async function pollOAuth(oauthState, provider, knownAccounts = new Set()) {
   const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -784,10 +812,19 @@ async function pollOAuth(oauthState, provider) {
       const data = await management(`get-auth-status?state=${encodeURIComponent(oauthState)}`);
       const status = String(data.status || "").toLowerCase();
       if (status === "ok" || status === "success" || status === "completed") {
-        $("#oauth-progress").textContent = `${provider} 登录成功`;
-        await loadAccounts();
-        await loadModels();
-        notify(`${provider} 登录成功`);
+        // The credential is already on disk at this point. Refreshing the UI is
+        // best-effort: a rendering failure must never be reported as a login
+        // failure, otherwise the operator deletes a perfectly good account.
+        $("#oauth-progress").textContent = `${provider} 登录成功，正在同步账号…`;
+        try {
+          await syncOAuthAccount(provider, knownAccounts);
+          await loadModels();
+          $("#oauth-progress").textContent = `${provider} 登录成功`;
+          notify(`${provider} 登录成功，账号列表已刷新`);
+        } catch (refreshError) {
+          $("#oauth-progress").textContent = `${provider} 登录成功（列表刷新失败）`;
+          notify(`${provider} 登录成功，但界面刷新失败：${refreshError.message}。凭证已保存，请手动刷新页面，不要删除该账号。`, true);
+        }
         return;
       }
       if (status === "error" || status === "failed") throw new Error(data.error || data.message || "OAuth 登录失败");
@@ -1200,7 +1237,8 @@ async function loadModels() {
     });
     select.append(group);
   });
-  $("#model-count").textContent = String(state.models.length);
+  const modelCount = $("#model-count");
+  if (modelCount) modelCount.textContent = String(state.models.length);
   renderProviderModelCatalogs();
 }
 
