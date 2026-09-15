@@ -133,3 +133,31 @@ func jsonResponse(body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
+
+func jsonResponseStatus(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+// TestOnboardUserSurfacesValidationHint ensures the VALIDATION_REQUIRED error
+// payload from Google is parsed into a readable operator-facing message that
+// includes the verification URL, instead of being truncated to 200 chars.
+func TestOnboardUserSurfacesValidationHint(t *testing.T) {
+	body := `{"error":{"code":403,"message":"Permission denied","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"VALIDATION_REQUIRED","domain":"cloudcode-pa.googleapis.com","metadata":{"validation_error_message":"Verify your account to continue.","validation_url":"https://accounts.google.com/verify?id=ABC","validation_url_link_text":"Verify your account"}}]}}`
+	auth := NewAntigravityAuth(nil, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponseStatus(http.StatusForbidden, body), nil
+	})})
+	_, err := auth.OnboardUser(context.Background(), "tok", "free-tier")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"VALIDATION_REQUIRED", "Verify your account to continue.", "https://accounts.google.com/verify?id=ABC"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error should include %q, got: %v", want, err)
+		}
+	}
+}

@@ -363,16 +363,61 @@ func (o *AntigravityAuth) OnboardUser(ctx context.Context, accessToken, tierID s
 		}
 
 		responsePreview := strings.TrimSpace(string(bodyBytes))
-		if len(responsePreview) > 500 {
-			responsePreview = responsePreview[:500]
+		if len(responsePreview) > 2000 {
+			responsePreview = responsePreview[:2000] + "...(truncated)"
 		}
 
-		responseErr := responsePreview
-		if len(responseErr) > 200 {
-			responseErr = responseErr[:200]
+		// Try to extract Google's structured validation hint so the operator
+		// sees the real "Verify your account" URL instead of a 200-char blob.
+		hint := extractValidationHint(bodyBytes)
+		if hint != "" {
+			return "", fmt.Errorf("onboardUser http %d: %s | full body: %s", resp.StatusCode, hint, responsePreview)
 		}
-		return "", fmt.Errorf("http %d: %s", resp.StatusCode, responseErr)
+		return "", fmt.Errorf("onboardUser http %d: %s", resp.StatusCode, responsePreview)
 	}
 
 	return "", fmt.Errorf("onboard user did not complete after %d attempts", maxAttempts)
+}
+
+// extractValidationHint pulls the human-readable validation message and
+// verification URL out of a Google Code Assist error body. The backend wraps
+// account-verification failures in a google.rpc.ErrorInfo entry with reason
+// VALIDATION_REQUIRED and metadata fields such as validation_error_message,
+// validation_url_link_text and validation_url. Returning that as a single
+// string lets operators see the exact link to visit.
+func extractValidationHint(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+			Details []struct {
+				Type     string            `json:"@type"`
+				Reason   string            `json:"reason"`
+				Domain   string            `json:"domain"`
+				Metadata map[string]string `json:"metadata"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return ""
+	}
+	parts := []string{}
+	if envelope.Error.Message != "" {
+		parts = append(parts, envelope.Error.Message)
+	}
+	for _, d := range envelope.Error.Details {
+		if d.Reason != "" {
+			parts = append(parts, "reason="+d.Reason)
+		}
+		for _, key := range []string{"validation_error_message", "validation_url", "validation_url_link_text"} {
+			if v := strings.TrimSpace(d.Metadata[key]); v != "" {
+				parts = append(parts, key+"="+v)
+			}
+		}
+	}
+	return strings.Join(parts, " | ")
 }
