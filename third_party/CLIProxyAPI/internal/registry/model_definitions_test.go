@@ -2,6 +2,52 @@ package registry
 
 import "testing"
 
+func TestAntigravityThinkingLevelsSurviveCatalogRefresh(t *testing.T) {
+	old := getModels()
+	t.Cleanup(func() {
+		modelsCatalogStore.mu.Lock()
+		modelsCatalogStore.data = old
+		modelsCatalogStore.mu.Unlock()
+	})
+	catalog := &staticModelsJSON{Antigravity: []*ModelInfo{
+		{ID: "gemini-3-flash", DisplayName: "Flash"},
+		{ID: "gemini-3.8-flash-tiered", DisplayName: "Flash Tiered"},
+	}}
+	modelsCatalogStore.mu.Lock()
+	modelsCatalogStore.data = catalog
+	modelsCatalogStore.mu.Unlock()
+	models := GetAntigravityModels()
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2", len(models))
+	}
+	want := map[string][]string{
+		"gemini-3-flash":          {"minimal", "low", "medium", "high"},
+		"gemini-3.8-flash-tiered": {"low", "medium", "high"},
+	}
+	for _, model := range models {
+		if model == nil || model.Thinking == nil || !equalStrings(model.Thinking.Levels, want[model.ID]) {
+			t.Fatalf("thinking metadata for %v = %+v", model, model.Thinking)
+		}
+	}
+	for _, model := range catalog.Antigravity {
+		if model.Thinking != nil {
+			t.Fatalf("shared remote catalog was mutated for %s", model.ID)
+		}
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestModelOverrideHeadersFromEmbeddedModels(t *testing.T) {
 	const wantUA = "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)"
 	got := ModelOverrideHeaders("gpt-5.6-luna")

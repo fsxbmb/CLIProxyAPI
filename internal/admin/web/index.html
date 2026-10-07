@@ -149,6 +149,7 @@ export OPENAI_API_KEY="你的本机 API key"</pre>
           <p class="eyebrow">MODEL TEST</p>
           <h2>发送最小测试请求</h2>
           <label>模型<select id="test-model"><option value="">先刷新模型列表</option></select></label>
+          <label>思考等级<select id="test-thinking" disabled><option value="">由上游决定</option></select></label>
           <label>测试内容<textarea id="test-prompt" rows="3">只回复 OK</textarea></label>
           <div class="form-actions"><button id="refresh-models" class="ghost">刷新模型</button><button id="run-test" class="primary">发送测试</button></div>
           <pre id="test-output" class="output">等待测试</pre>

@@ -1216,6 +1216,7 @@ function renderProviderModels(provider) {
     button.addEventListener("click", () => {
       const option = [...$("#test-model").options].find((item) => item.value === id);
       if (option) $("#test-model").value = id;
+      updateTestThinkingLevels();
       activateTab("debug");
       $("#test-model").focus();
       notify(`已选择 ${id}，点击发送测试即可验证`);
@@ -1259,6 +1260,23 @@ async function loadModels() {
   const modelCount = $("#model-count");
   if (modelCount) modelCount.textContent = String(state.models.length);
   renderProviderModelCatalogs();
+  updateTestThinkingLevels();
+}
+
+function updateTestThinkingLevels() {
+  const model = state.models.find((item) => (item.id || item.name || item) === $("#test-model").value);
+  const levels = Array.isArray(model?.thinking?.levels) ? model.thinking.levels : [];
+  const select = $("#test-thinking");
+  const previous = select.value;
+  select.replaceChildren();
+  ["", ...levels].forEach((level) => {
+    const option = document.createElement("option");
+    option.value = level;
+    option.textContent = level || "由上游决定";
+    select.append(option);
+  });
+  select.disabled = levels.length === 0;
+  select.value = levels.includes(previous) ? previous : (levels.includes("medium") ? "medium" : "");
 }
 
 async function runModelTest() {
@@ -1290,7 +1308,11 @@ async function runModelTest() {
       data = await proxyAPI("v1/chat/completions", {
         method: "POST",
         signal: controller.signal,
-        body: { model, messages: [{ role: "user", content: prompt }], stream: false, max_tokens: 80 },
+        body: {
+          model, messages: [{ role: "user", content: prompt }], stream: false,
+          max_tokens: $("#test-thinking").value ? 1024 : 80,
+          ...($("#test-thinking").value ? { reasoning_effort: $("#test-thinking").value } : {}),
+        },
       });
       const content = data.choices?.[0]?.message?.content ?? data.output_text ?? data;
       $("#test-output").textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
@@ -1367,6 +1389,7 @@ function bindEvents() {
   $("#refresh-relays").addEventListener("click", () => loadRelays().catch((error) => notify(error.message, true)));
   $("#refresh-models").addEventListener("click", () => loadModels().then(() => notify("模型列表已刷新")).catch((error) => notify(error.message, true)));
   $("#run-test").addEventListener("click", runModelTest);
+  $("#test-model").addEventListener("change", updateTestThinkingLevels);
   $("#debug-toggle").addEventListener("change", setDebug);
   $("#run-diagnostics").addEventListener("click", diagnostics);
 }

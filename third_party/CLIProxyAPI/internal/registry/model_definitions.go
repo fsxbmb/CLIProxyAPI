@@ -80,7 +80,28 @@ func GetKimiModels() []*ModelInfo {
 
 // GetAntigravityModels returns the standard Antigravity model definitions.
 func GetAntigravityModels() []*ModelInfo {
-	return cloneModelInfos(getModels().Antigravity)
+	models := cloneModelInfos(getModels().Antigravity)
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		switch model.ID {
+		case "gemini-3-flash":
+			if model.Thinking == nil {
+				model.Thinking = &ThinkingSupport{}
+			}
+			// Verified against the Antigravity endpoint. Keep the capability
+			// metadata even when a refreshed remote catalog omits it.
+			model.Thinking.Levels = []string{"minimal", "low", "medium", "high"}
+		case "gemini-3.8-flash-tiered":
+			if model.Thinking == nil {
+				model.Thinking = &ThinkingSupport{}
+			}
+			// This upstream entry accepts the three non-minimal levels.
+			model.Thinking.Levels = []string{"low", "medium", "high"}
+		}
+	}
+	return models
 }
 
 // AntigravityWebSearchModelFor returns the Antigravity model that should run a
