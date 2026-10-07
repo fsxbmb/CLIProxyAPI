@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.fsxbmb.cliproxy-quota-guard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/bao/Library/Application Support/CLIProxyAPI-Lite/scripts/quota_guard.py</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/bao/Library/Application Support/CLIProxyAPI-Lite/logs/quota_guard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bao/Library/Application Support/CLIProxyAPI-Lite/logs/quota_guard_error.log</string>
+</dict>
+</plist>

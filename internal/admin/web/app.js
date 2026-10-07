@@ -1145,7 +1145,26 @@ async function deleteRelay(index) {
   } catch (error) { notify(`删除失败：${error.message}`, true); }
 }
 
-function vendorOf(modelId) {
+function vendorOf(model) {
+  const modelId = model && typeof model === "object" ? (model.id || model.name || "") : model;
+  const ownedBy = model && typeof model === "object" ? String(model.owned_by || "").toLowerCase() : "";
+  const sourceGroups = new Map([
+    ["antigravity", "Gemini"],
+    ["google", "Gemini"],
+    ["gemini", "Gemini"],
+    ["anthropic", "Claude"],
+    ["claude", "Claude"],
+    ["openai", "ChatGPT / Codex"],
+    ["codex", "ChatGPT / Codex"],
+    ["xai", "Grok"],
+    ["deepseek", "DeepSeek"],
+    ["qwen", "Qwen"],
+    ["kimi", "Kimi"],
+    ["glm", "GLM"],
+    ["mistral", "Mistral"],
+  ]);
+  if (sourceGroups.has(ownedBy)) return sourceGroups.get(ownedBy);
+
   const raw = String(modelId || "");
   const lower = raw.toLowerCase();
   const slash = raw.includes("/") ? lower.split("/")[0] : "";
@@ -1222,7 +1241,7 @@ async function loadModels() {
   select.append(placeholder);
   const grouped = new Map();
   state.models.forEach((model) => {
-    const vendor = vendorOf(model.id || model.name);
+    const vendor = vendorOf(model);
     if (!grouped.has(vendor)) grouped.set(vendor, []);
     grouped.get(vendor).push(model);
   });
