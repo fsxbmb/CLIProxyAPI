@@ -226,12 +226,13 @@ def check_claude(filepath, data, state, opener):
         return
 
     five_hour = quota.get("five_hour", {})
-    utilization_5h = five_hour.get("utilization", 0.0)
+    # Anthropic utilization is a percentage (2.0 means 2%), not a fraction.
+    utilization_5h = float(five_hour.get("utilization", 0.0) or 0.0) / 100.0
     resets_at_str_5h = five_hour.get("resets_at")
     resets_at_dt_5h = parse_iso(resets_at_str_5h)
 
     seven_day = quota.get("seven_day", {})
-    utilization_7d = seven_day.get("utilization", 0.0)
+    utilization_7d = float(seven_day.get("utilization", 0.0) or 0.0) / 100.0
     resets_at_str_7d = seven_day.get("resets_at")
     resets_at_dt_7d = parse_iso(resets_at_str_7d)
 

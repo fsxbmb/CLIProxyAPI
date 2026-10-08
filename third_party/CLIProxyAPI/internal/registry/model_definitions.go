@@ -35,7 +35,20 @@ type staticModelsJSON struct {
 
 // GetClaudeModels returns the standard Claude model definitions.
 func GetClaudeModels() []*ModelInfo {
-	return cloneModelInfos(getModels().Claude)
+	models := cloneModelInfos(getModels().Claude)
+	for _, model := range models {
+		if model != nil && model.ID == "claude-opus-5-5" {
+			return models
+		}
+	}
+	// Keep the official release available when the remote catalog lags behind
+	// the account's Models API. This is a real upstream ID, not an alias.
+	return append(models, &ModelInfo{
+		ID: "claude-opus-5-5", Object: "model", OwnedBy: "anthropic", Type: "claude",
+		DisplayName: "Claude Opus 5.5", ContextLength: 1000000, MaxCompletionTokens: 128000,
+		Thinking:                 &ThinkingSupport{DynamicAllowed: true, Levels: []string{"low", "medium", "high", "xhigh", "max"}},
+		SupportedInputModalities: []string{"text", "image"}, SupportedOutputModalities: []string{"text"},
+	})
 }
 
 // GetGeminiModels returns the standard Gemini model definitions.
