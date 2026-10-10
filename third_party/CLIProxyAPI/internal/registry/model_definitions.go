@@ -68,7 +68,7 @@ func GetAIStudioModels() []*ModelInfo {
 
 // GetCodexFreeModels returns model definitions for the Codex free plan tier.
 func GetCodexFreeModels() []*ModelInfo {
-	return WithCodexBuiltins(cloneModelInfos(getModels().CodexFree))
+	return withCodexGPT6Models(WithCodexBuiltins(cloneModelInfos(getModels().CodexFree)), false)
 }
 
 // GetCodexTeamModels returns model definitions for the Codex team plan tier.
@@ -78,12 +78,45 @@ func GetCodexTeamModels() []*ModelInfo {
 
 // GetCodexPlusModels returns model definitions for the Codex plus plan tier.
 func GetCodexPlusModels() []*ModelInfo {
-	return WithCodexBuiltins(cloneModelInfos(getModels().CodexPlus))
+	return withCodexGPT6Models(WithCodexBuiltins(cloneModelInfos(getModels().CodexPlus)), true)
 }
 
 // GetCodexProModels returns model definitions for the Codex pro plan tier.
 func GetCodexProModels() []*ModelInfo {
-	return WithCodexBuiltins(cloneModelInfos(getModels().CodexPro))
+	return withCodexGPT6Models(WithCodexBuiltins(cloneModelInfos(getModels().CodexPro)), true)
+}
+
+// withCodexGPT6Models fills gaps in older catalogs without replacing upstream
+// metadata. The official account catalog exposes only Luna on the free tier.
+func withCodexGPT6Models(models []*ModelInfo, paid bool) []*ModelInfo {
+	ids := []string{"gpt-6-luna"}
+	if paid {
+		ids = []string{"gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"}
+	}
+	for _, id := range ids {
+		found := false
+		for _, model := range models {
+			if model != nil && model.ID == id {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		levels := []string{"low", "medium", "high", "xhigh", "max"}
+		if id != "gpt-6-luna" {
+			levels = append(levels, "ultra")
+		}
+		models = append(models, &ModelInfo{
+			ID: id, Object: "model", OwnedBy: "openai", Type: "openai",
+			DisplayName: id, Version: id, ContextLength: 272000,
+			Thinking:                  &ThinkingSupport{Levels: levels},
+			SupportedInputModalities:  []string{"text", "image"},
+			SupportedOutputModalities: []string{"text"},
+		})
+	}
+	return models
 }
 
 // GetKimiModels returns the standard Kimi (Moonshot AI) model definitions.

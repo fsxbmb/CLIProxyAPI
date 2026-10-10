@@ -2,6 +2,66 @@ package registry
 
 import "testing"
 
+func TestCodexGPT6ModelsSurviveCatalogRefresh(t *testing.T) {
+	old := getModels()
+	t.Cleanup(func() {
+		modelsCatalogStore.mu.Lock()
+		modelsCatalogStore.data = old
+		modelsCatalogStore.mu.Unlock()
+	})
+	catalog := &staticModelsJSON{}
+	modelsCatalogStore.mu.Lock()
+	modelsCatalogStore.data = catalog
+	modelsCatalogStore.mu.Unlock()
+	for _, tc := range []struct {
+		name string
+		get  func() []*ModelInfo
+		want int
+	}{
+		{"free", GetCodexFreeModels, 1},
+		{"plus", GetCodexPlusModels, 4},
+		{"pro", GetCodexProModels, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			count := 0
+			for _, model := range tc.get() {
+				if model.ID == "gpt-6-luna" || model.ID == "gpt-6-sol" || model.ID == "gpt-6.1-sol" || model.ID == "gpt-6-astra" {
+					count++
+					if tc.name == "free" && model.ID != "gpt-6-luna" {
+						t.Fatalf("free account received paid model %s", model.ID)
+					}
+					if model.ContextLength != 272000 || model.Thinking == nil {
+						t.Fatalf("missing official metadata for %s", model.ID)
+					}
+				}
+			}
+			if count != tc.want {
+				t.Fatalf("GPT-6 model count = %d, want %d", count, tc.want)
+			}
+		})
+	}
+	if len(catalog.CodexFree)+len(catalog.CodexPlus)+len(catalog.CodexPro) != 0 {
+		t.Fatal("shared catalog was mutated")
+	}
+}
+
+func TestCodexGPT6PreservesUpstreamMetadata(t *testing.T) {
+	original := &ModelInfo{ID: "gpt-6-sol", ContextLength: 999999}
+	models := withCodexGPT6Models([]*ModelInfo{original}, true)
+	count := 0
+	for _, model := range models {
+		if model.ID == original.ID {
+			count++
+			if model != original || model.ContextLength != 999999 {
+				t.Fatal("upstream model metadata was replaced")
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("duplicate model: count = %d", count)
+	}
+}
+
 func TestAntigravityThinkingLevelsSurviveCatalogRefresh(t *testing.T) {
 	old := getModels()
 	t.Cleanup(func() {
