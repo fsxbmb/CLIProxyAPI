@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
@@ -21,10 +22,17 @@ const (
 
 type antigravityFetchAvailableModelsResponse struct {
 	WebSearchModelIDs []string `json:"webSearchModelIds"`
+	Models            map[string]struct {
+		DisplayName     string `json:"displayName"`
+		MaxTokens       int    `json:"maxTokens"`
+		MaxOutputTokens int    `json:"maxOutputTokens"`
+		SupportsImages  bool   `json:"supportsImages"`
+	} `json:"models"`
 }
 
 type antigravityModelCapabilityHints struct {
 	WebSearchModelIDs map[string]struct{}
+	DiscoveredModels  []*ModelInfo
 }
 
 func (s *Service) fetchAntigravityModelCapabilityHintsForAuth(ctx context.Context, auth *coreauth.Auth) antigravityModelCapabilityHints {
@@ -36,6 +44,14 @@ func (s *Service) fetchAntigravityModelCapabilityHintsForAuth(ctx context.Contex
 	if accessToken == "" {
 		return antigravityModelCapabilityHints{}
 	}
+	payload := map[string]string{}
+	if project, ok := auth.Metadata["project_id"].(string); ok && strings.TrimSpace(project) != "" {
+		payload["project"] = strings.TrimSpace(project)
+	}
+	requestBody, errMarshal := json.Marshal(payload)
+	if errMarshal != nil {
+		return antigravityModelCapabilityHints{}
+	}
 
 	client := &http.Client{}
 	if transport, _, errProxy := proxyutil.BuildHTTPTransport(s.antigravityModelFetchProxyURL(auth)); errProxy == nil && transport != nil {
@@ -43,7 +59,7 @@ func (s *Service) fetchAntigravityModelCapabilityHintsForAuth(ctx context.Contex
 	}
 
 	for _, baseURL := range antigravityModelBaseURLs(auth) {
-		req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+antigravityModelsPath, strings.NewReader(`{}`))
+		req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+antigravityModelsPath, strings.NewReader(string(requestBody)))
 		if errReq != nil {
 			continue
 		}
@@ -67,7 +83,7 @@ func (s *Service) fetchAntigravityModelCapabilityHintsForAuth(ctx context.Contex
 			continue
 		}
 		hints := parseAntigravityModelCapabilityHints(body)
-		if len(hints.WebSearchModelIDs) > 0 {
+		if len(hints.WebSearchModelIDs) > 0 || len(hints.DiscoveredModels) > 0 {
 			return hints
 		}
 	}
@@ -125,12 +141,46 @@ func parseAntigravityModelCapabilityHints(body []byte) antigravityModelCapabilit
 			webSearchModels[modelID] = struct{}{}
 		}
 	}
-	return antigravityModelCapabilityHints{WebSearchModelIDs: webSearchModels}
+	hints := antigravityModelCapabilityHints{WebSearchModelIDs: webSearchModels}
+	for id, fetched := range parsed.Models {
+		switch id {
+		case "gemini-4-argon-low", "gemini-4-argon-medium", "gemini-4-argon-high":
+		case "gemini-3.8-flash-tiered", "gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high":
+		default:
+			continue
+		}
+		inputs := []string{"text"}
+		if fetched.SupportsImages {
+			inputs = append(inputs, "image")
+		}
+		displayName := fetched.DisplayName
+		if displayName == "" {
+			displayName = id
+		}
+		hints.DiscoveredModels = append(hints.DiscoveredModels, &ModelInfo{
+			ID: id, Object: "model", OwnedBy: "google", Type: "antigravity",
+			DisplayName: displayName, Name: id, Version: id,
+			ContextLength: fetched.MaxTokens, MaxCompletionTokens: fetched.MaxOutputTokens,
+			SupportedInputModalities: inputs, SupportedOutputModalities: []string{"text"},
+		})
+	}
+	sort.Slice(hints.DiscoveredModels, func(i, j int) bool { return hints.DiscoveredModels[i].ID < hints.DiscoveredModels[j].ID })
+	return hints
 }
 
 func applyAntigravityFetchedModelCapabilities(models []*ModelInfo, hints antigravityModelCapabilityHints) []*ModelInfo {
-	if len(models) == 0 || len(hints.WebSearchModelIDs) == 0 {
-		return models
+	// Only advertise new models on accounts whose upstream catalog includes them.
+	for _, fetched := range hints.DiscoveredModels {
+		found := false
+		for _, existing := range models {
+			if existing != nil && existing.ID == fetched.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			models = append(models, fetched)
+		}
 	}
 
 	for _, model := range models {

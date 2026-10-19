@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	antigravityFallbackVersion = "2.2.1"
+	antigravityFallbackVersion = "2.24.0"
 	antigravityHubPlatform     = "darwin/arm64"
 	antigravityVersionCacheTTL = 6 * time.Hour
 	antigravityFetchTimeout    = 10 * time.Second
@@ -78,7 +79,7 @@ func refreshAntigravityVersion(ctx context.Context) {
 	now := time.Now()
 
 	if errFetch == nil {
-		cachedAntigravityVersion = version
+		cachedAntigravityVersion = supportedAntigravityVersion(version)
 		antigravityVersionExpiry = now.Add(antigravityVersionCacheTTL)
 		log.WithField("version", version).Info("fetched latest antigravity version")
 		return
@@ -92,6 +93,26 @@ func refreshAntigravityVersion(ctx context.Context) {
 	}
 
 	log.WithError(errFetch).Debug("failed to refresh antigravity version, keeping cached value")
+}
+
+// Older updater manifests must not downgrade the model-discovery protocol.
+func supportedAntigravityVersion(version string) string {
+	if !isValidAntigravitySemVersion(version) {
+		return antigravityFallbackVersion
+	}
+	parts := strings.Split(version, ".")
+	minimum := strings.Split(antigravityFallbackVersion, ".")
+	for i := range parts {
+		value, _ := strconv.Atoi(parts[i])
+		floor, _ := strconv.Atoi(minimum[i])
+		if value < floor {
+			return antigravityFallbackVersion
+		}
+		if value > floor {
+			return version
+		}
+	}
+	return version
 }
 
 // AntigravityLatestVersion returns the cached antigravity version refreshed by StartAntigravityVersionUpdater.

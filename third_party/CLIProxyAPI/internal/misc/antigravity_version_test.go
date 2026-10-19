@@ -42,8 +42,8 @@ func TestAntigravityLatestVersionUsesCurrentHubFallback(t *testing.T) {
 	defer restore()
 
 	version := AntigravityLatestVersion()
-	if version != "2.2.1" {
-		t.Fatalf("AntigravityLatestVersion() = %q, want %q", version, "2.2.1")
+	if version != "2.24.0" {
+		t.Fatalf("AntigravityLatestVersion() = %q, want %q", version, "2.24.0")
 	}
 }
 
@@ -54,6 +54,17 @@ func TestAntigravityUserAgentUsesHubFamily(t *testing.T) {
 	want := "antigravity/hub/2.2.1 darwin/arm64"
 	if got := AntigravityUserAgent(); got != want {
 		t.Fatalf("AntigravityUserAgent() = %q, want %q", got, want)
+	}
+}
+
+func TestSupportedAntigravityVersionPreventsDowngrade(t *testing.T) {
+	for _, version := range []string{"", "invalid", "2.2.1", "2.23.0"} {
+		if got := supportedAntigravityVersion(version); got != "2.24.0" {
+			t.Fatalf("supportedAntigravityVersion(%q) = %q", version, got)
+		}
+	}
+	if got := supportedAntigravityVersion("2.25.0"); got != "2.25.0" {
+		t.Fatalf("must retain newer versions, got %q", got)
 	}
 }
 

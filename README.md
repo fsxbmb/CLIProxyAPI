@@ -144,6 +144,13 @@ proxy-url: "http://127.0.0.1:7890"
 
 第三方中转需要填写 Base URL、API key 和模型映射。余额接口因供应商不同而不同，已知供应商会自动匹配，其他供应商可以在 Web UI 中填写余额查询 URL 和 JSON 路径。
 
+Antigravity 使用不低于 2.24.0 的客户端兼容版本，并按每个账号的上游模型列表补充 Gemini 4 Argon 和 Gemini 3.8 Flash：
+
+- Gemini 4：`gemini-4-argon-low`、`gemini-4-argon-medium`、`gemini-4-argon-high`；
+- Gemini 3.8：`gemini-3.8-flash-tiered`、`gemini-3.8-flash-low`、`gemini-3.8-flash-medium`、`gemini-3.8-flash-high`。
+
+原有 `gemini-3-flash` 保留，不会被重命名或替换。新模型只注册到上游明确返回该模型的账号；套餐名称相同不代表模型权限相同，`disabled` 占位项不会注册。模型已列出不保证调用时仍有额度或可用容量。
+
 ### 多账号路由策略
 
 默认使用 `fill-first`：优先持续使用一个可用账号，直到上游报告额度耗尽或账号暂时不可用，再切换到下一个账号。这样比 `round-robin` 更有利于保持同一账号的 Prompt Cache。可在 `config.yaml` 中改为：
